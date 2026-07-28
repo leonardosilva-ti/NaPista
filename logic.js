@@ -8,12 +8,12 @@ export const defaultData = {
         mediaPrecoCombustivel: 0,
         plataformas: ["Uber", "99", "InDrive", "Particular"]
     },
-    history: [] // [{ date: 'YYYY-MM-DD', earnings: {Uber: 10}, km: 100, refuel: 50, expenses: 20 }]
+    history: [] // [{ date: 'YYYY-MM-DD', earnings: {Uber: 10}, km: 100, consumoL: 10.5, expenses: 20 }]
 };
 
 // Funções de Cálculo
 
-export function calculateDailyTargets(settings, history = []) {
+export function calculateDailyTargets(settings, history = [], currentDate = null, currentDayInputs = null) {
     const { 
         diasTrabalhoMes, 
         metaLiquidaMensal, 
@@ -22,59 +22,65 @@ export function calculateDailyTargets(settings, history = []) {
         mediaPrecoCombustivel 
     } = settings;
 
-    // Custo de combustível por KM rodado
+    // Custo base de combustível
     const custoCombustivelPorKm = mediaPrecoCombustivel / mediaConsumoL;
-    
-    // Lucro líquido real por KM rodado
     const lucroLiquidoPorKm = mediaPagamentoKm - custoCombustivelPorKm;
 
     if (lucroLiquidoPorKm <= 0) {
         return { error: "O custo de combustível é maior ou igual ao ganho por KM. Meta impossível." };
     }
 
-    // Calcular o total de KM que precisa rodar no mês para bater a meta
-    const kmTotalMensal = metaLiquidaMensal / lucroLiquidoPorKm;
-    
-    // Valor bruto total que precisa fazer no mês
-    const metaBrutaMensal = kmTotalMensal * mediaPagamentoKm;
+    const hojeStr = currentDate || new Date().toISOString().split('T')[0];
+    const targetDateObj = new Date(hojeStr + 'T12:00:00');
+    const currentMonth = targetDateObj.getMonth();
+    const currentYear = targetDateObj.getFullYear();
 
-    // Pegar o mês atual para filtrar histórico
-    const hoje = new Date();
-    const currentMonth = hoje.getMonth();
-    const currentYear = hoje.getFullYear();
-
+    // Filtra o histórico deste mês, excluindo o dia atual sendo visualizado para substituirmos pelos inputs
     const historyThisMonth = history.filter(item => {
-        const itemDate = new Date(item.date + 'T12:00:00'); // Evitar timezone issues
-        return itemDate.getMonth() === currentMonth && itemDate.getFullYear() === currentYear;
+        const itemDate = new Date(item.date + 'T12:00:00');
+        return itemDate.getMonth() === currentMonth && itemDate.getFullYear() === currentYear && item.date !== hojeStr;
     });
 
     let ganhosBrutosRealizados = 0;
     let kmRodadoRealizado = 0;
     let gastosCombustivelEstimadoRealizado = 0;
 
-    const diasTrabalhados = historyThisMonth.length;
-    // Opcional: checar se hoje já foi trabalhado para não contar hoje duas vezes nos dias faltantes
-    const hojeStr = hoje.toISOString().split('T')[0];
-    const trabalhouHoje = historyThisMonth.find(h => h.date === hojeStr);
-
+    // Calcular dias anteriores do mês
     historyThisMonth.forEach(day => {
         let dailyEarn = 0;
         for (let p in day.earnings) { dailyEarn += (parseFloat(day.earnings[p]) || 0); }
         ganhosBrutosRealizados += dailyEarn;
         kmRodadoRealizado += parseFloat(day.km || 0);
         
-        // Gasto de combustível baseado no KM real do dia
-        gastosCombustivelEstimadoRealizado += (parseFloat(day.km || 0) / mediaConsumoL) * mediaPrecoCombustivel;
+        const consumoUsado = parseFloat(day.consumoL) || mediaConsumoL;
+        gastosCombustivelEstimadoRealizado += (parseFloat(day.km || 0) / consumoUsado) * mediaPrecoCombustivel;
     });
+
+    // Injetar os valores do dia atual (inputs ativos) no somatório do mês
+    if (currentDayInputs) {
+        let currentDayEarn = 0;
+        for (let p in currentDayInputs.earnings) { currentDayEarn += (parseFloat(currentDayInputs.earnings[p]) || 0); }
+        ganhosBrutosRealizados += currentDayEarn;
+        
+        const cKm = parseFloat(currentDayInputs.km) || 0;
+        kmRodadoRealizado += cKm;
+        
+        const cConsumo = parseFloat(currentDayInputs.consumoL) || mediaConsumoL;
+        gastosCombustivelEstimadoRealizado += (cKm / cConsumo) * mediaPrecoCombustivel;
+    }
 
     const lucroLiquidoRealizado = ganhosBrutosRealizados - gastosCombustivelEstimadoRealizado;
     
+    // Lucro que ainda falta para bater a meta mensal
     const metaLiquidaRestante = metaLiquidaMensal - lucroLiquidoRealizado;
     
+    // Calcular dias que já foram trabalhados (incluindo hoje)
+    let diasTrabalhados = historyThisMonth.length + 1; // +1 do dia sendo preenchido
     let diasRestantes = diasTrabalhoMes - diasTrabalhados;
-    if (diasRestantes <= 0) diasRestantes = 1; // Para evitar divisão por zero se o cara trabalhar mais dias
+    
+    // Se o cara trabalhou mais dias do que planejou, forçar divisão por 1 para evitar metas diárias infinitas
+    if (diasRestantes <= 0) diasRestantes = 1; 
 
-    // Se já bateu a meta do mês inteiro
     if (metaLiquidaRestante <= 0) {
         return {
             metaAlcancada: true,
@@ -84,7 +90,6 @@ export function calculateDailyTargets(settings, history = []) {
         };
     }
 
-    // Calcula quanto falta bater bruto pros dias restantes
     const kmTotalRestante = metaLiquidaRestante / lucroLiquidoPorKm;
     const metaBrutaRestante = kmTotalRestante * mediaPagamentoKm;
 
@@ -94,22 +99,18 @@ export function calculateDailyTargets(settings, history = []) {
     return {
         metaAlcancada: false,
         metaBrutaDiaria: Math.max(0, metaBrutaDiaria),
-        kmDiario: Math.max(0, kmDiario),
-        diasTrabalhados,
-        diasRestantes,
-        ganhosBrutosRealizados,
-        lucroLiquidoRealizado
+        kmDiario: Math.max(0, kmDiario)
     };
 }
 
-export function getTodayStats(history) {
-    const hojeStr = new Date().toISOString().split('T')[0];
-    const todayData = history.find(h => h.date === hojeStr);
+export function getDayStats(history, dateStr) {
+    const todayData = history.find(h => h.date === dateStr);
     
     if (!todayData) {
         return {
             totalEarned: 0,
             km: 0,
+            consumoL: '', // vazio para puxar a média
             expenses: 0,
             earnings: {}
         };
@@ -121,7 +122,8 @@ export function getTodayStats(history) {
     return {
         totalEarned,
         km: parseFloat(todayData.km || 0),
-        expenses: parseFloat(todayData.expenses || 0) + parseFloat(todayData.refuel || 0), // refuel doesn't affect target directly, but is tracked
-        earnings: todayData.earnings
+        consumoL: todayData.consumoL ? parseFloat(todayData.consumoL) : '',
+        expenses: parseFloat(todayData.expenses || 0),
+        earnings: todayData.earnings || {}
     };
 }
