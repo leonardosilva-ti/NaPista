@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Na Pista - Controle de Ganhos</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://apis.google.com/js/api.js" async defer></script>
+</head>
+<body>
+    <div id="app">
+        <!-- LOADING -->
+        <div id="loading-screen" class="screen active text-center" style="margin-top: 50%;">
+            <h2>Carregando...</h2>
+        </div>
+
+        <!-- LOGIN SCREEN -->
+        <div id="login-screen" class="screen text-center" style="margin-top: 20%;">
+            <h1 style="font-size: 3rem; color: var(--accent-secondary); text-shadow: var(--glow-secondary);">Na Pista</h1>
+            <p>Seu controle inteligente de ganhos com aplicativos.</p>
+            <div class="card mt-4">
+                <button id="btn-login" class="btn btn-primary">Entrar com Google</button>
+                <p style="font-size: 0.8rem; margin-top: 10px;">Seus dados são salvos de forma segura no seu próprio Google Drive.</p>
+            </div>
+        </div>
+
+        <!-- SETUP SCREEN -->
+        <div id="setup-screen" class="screen">
+            <h2 class="text-center">Primeiros Passos</h2>
+            <p class="text-center">Configure suas metas para começarmos.</p>
+            
+            <div class="card">
+                <div class="input-group">
+                    <label>Quantos dias pretende trabalhar por mês?</label>
+                    <input type="number" id="setup-dias" placeholder="Ex: 20">
+                </div>
+                <div class="input-group">
+                    <label>Qual a meta líquida por mês? (R$)</label>
+                    <input type="number" id="setup-meta" placeholder="Ex: 5000">
+                </div>
+                <div class="input-group">
+                    <label>Média de pagamento por KM aceita (R$)</label>
+                    <input type="number" id="setup-pagamento-km" step="0.01" placeholder="Ex: 1.50">
+                </div>
+                <div class="input-group">
+                    <label>Consumo médio do veículo (KM/L)</label>
+                    <input type="number" id="setup-consumo" step="0.1" placeholder="Ex: 10.5">
+                </div>
+                <div class="input-group">
+                    <label>Preço médio do litro de combustível (R$)</label>
+                    <input type="number" id="setup-preco-comb" step="0.01" placeholder="Ex: 5.50">
+                </div>
+                
+                <hr style="border-color: var(--border-color); margin: 20px 0;">
+                
+                <h3>Aplicativos Usados</h3>
+                <div id="setup-platforms-list" class="grid grid-2 mb-4">
+                    <!-- Gerado via JS -->
+                </div>
+                <div class="d-flex" style="gap: 10px;">
+                    <input type="text" id="setup-new-platform" placeholder="Outro app">
+                    <button id="btn-add-platform" class="btn btn-secondary" style="width: auto; padding: 14px;">+</button>
+                </div>
+                
+                <button id="btn-finish-setup" class="btn btn-primary mt-4">Concluir e Salvar</button>
+            </div>
+        </div>
+
+        <!-- DASHBOARD SCREEN -->
+        <div id="dashboard-screen" class="screen">
+            <div class="d-flex justify-between align-center mb-4">
+                <h2>Dashboard</h2>
+                <div>
+                    <button class="nav-btn" data-target="reports-screen">📊</button>
+                    <button class="nav-btn" data-target="profile-screen">⚙️</button>
+                </div>
+            </div>
+
+            <div class="card text-center" id="card-meta">
+                <h3 class="metric-subtitle">Falta para meta de hoje</h3>
+                <div id="dash-falta-hoje" class="metric-large">R$ 0,00</div>
+                <p id="dash-meta-diaria-info" style="font-size: 0.9rem;">Meta do dia: R$ 0,00</p>
+                <div class="progress-container">
+                    <div id="dash-progress-bar" class="progress-bar"></div>
+                </div>
+                <p id="dash-km-recomendado" style="font-size: 0.85rem; color: var(--accent-secondary);">Recomendado: 0 km hoje</p>
+            </div>
+
+            <h3>Lançamentos de Hoje</h3>
+            <div class="card">
+                <div id="dash-platform-inputs">
+                    <!-- Gerado via JS -->
+                </div>
+                
+                <hr style="border-color: var(--border-color); margin: 20px 0;">
+                
+                <div class="grid grid-2">
+                    <div class="input-group">
+                        <label>KM Rodado</label>
+                        <input type="number" id="dash-km" step="0.1" placeholder="0">
+                    </div>
+                    <div class="input-group">
+                        <label>Abastecimento (R$)</label>
+                        <input type="number" id="dash-refuel" step="0.01" placeholder="0.00">
+                    </div>
+                    <div class="input-group" style="grid-column: span 2;">
+                        <label>Outros Gastos (Alimentação, etc)</label>
+                        <input type="number" id="dash-expenses" step="0.01" placeholder="0.00">
+                    </div>
+                </div>
+                <button id="btn-save-day" class="btn btn-primary">Salvar Lançamentos</button>
+            </div>
+        </div>
+
+        <!-- REPORTS SCREEN -->
+        <div id="reports-screen" class="screen">
+            <div class="d-flex align-center mb-4" style="gap:15px;">
+                <button class="nav-btn" data-target="dashboard-screen">🔙</button>
+                <h2>Relatórios</h2>
+            </div>
+            
+            <div class="tabs">
+                <div class="tab-btn active" data-tab="tab-day">Dia</div>
+                <div class="tab-btn" data-tab="tab-week">Semana</div>
+                <div class="tab-btn" data-tab="tab-month">Mês</div>
+            </div>
+
+            <div class="card" id="report-content">
+                <!-- Gerado via JS -->
+            </div>
+        </div>
+
+        <!-- PROFILE SCREEN -->
+        <div id="profile-screen" class="screen">
+            <div class="d-flex align-center mb-4" style="gap:15px;">
+                <button class="nav-btn" data-target="dashboard-screen">🔙</button>
+                <h2>Configurações</h2>
+            </div>
+            
+            <div class="card">
+                <h3>Como usar?</h3>
+                <p style="font-size: 0.9rem;">Preencha os dados no Dashboard todos os dias. A meta será ajustada automaticamente se você rodar a mais ou a menos. Os abastecimentos servem para calcular seu consumo real.</p>
+            </div>
+
+            <div class="card">
+                <button id="btn-reconfig" class="btn btn-secondary mb-4">Alterar Metas</button>
+                <button id="btn-wipe-data" class="btn btn-danger mb-4">Zerar Conta e Dados</button>
+                <button id="btn-logout" class="btn btn-secondary">Sair</button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Módulos -->
+    <script src="app.js" type="module"></script>
+    <style>
+        .nav-btn {
+            background: rgba(255,255,255,0.1);
+            border: none;
+            border-radius: 50%;
+            width: 40px; height: 40px;
+            color: white; font-size: 1.2rem;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+        }
+        .nav-btn:hover { background: rgba(255,255,255,0.2); }
+        .platform-tag {
+            background: rgba(59, 130, 246, 0.2);
+            border: 1px solid var(--accent-primary);
+            padding: 8px 12px;
+            border-radius: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .platform-tag.active {
+            background: var(--accent-primary);
+        }
+    </style>
+</body>
+</html>
