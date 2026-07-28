@@ -29,7 +29,9 @@ function showScreen(screenId) {
 
 // Init
 window.onload = () => {
-    initAuth(onAuthenticated);
+    initAuth(onAuthenticated, () => {
+        showScreen('login-screen');
+    });
 };
 
 // Login Flow
@@ -42,7 +44,7 @@ async function onAuthenticated() {
         if (fileId) {
             appData = await readData(fileId);
             // Verifica se precisa de setup
-            if (!appData.settings || appData.settings.diasTrabalhoMes === 0) {
+            if (!appData || !appData.settings || appData.settings.diasTrabalhoMes === 0) {
                 renderSetup();
                 showScreen('setup-screen');
             } else {
@@ -55,7 +57,7 @@ async function onAuthenticated() {
         }
     } catch (e) {
         console.error(e);
-        alert("Erro ao carregar dados do Drive.");
+        alert(`Erro na comunicação com o Google Drive: ${e.message}\nVerifique se ativou a API do Google Drive no Cloud Console.`);
         showScreen('login-screen');
     }
 }
