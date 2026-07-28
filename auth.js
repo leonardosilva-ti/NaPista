@@ -4,10 +4,17 @@ const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
 let tokenClient;
 let accessToken = null;
 
-export function initAuth(onAuthenticated) {
+let retryCount = 0;
+
+export function initAuth(onAuthenticated, onNeedsLogin) {
     if (typeof google === 'undefined' || !google.accounts) {
         console.error("Google API não carregada.");
-        setTimeout(() => initAuth(onAuthenticated), 500);
+        retryCount++;
+        if (retryCount > 10) {
+            alert("Erro: A biblioteca do Google não foi carregada. Verifique sua conexão ou desative bloqueadores de anúncios.");
+            return;
+        }
+        setTimeout(() => initAuth(onAuthenticated, onNeedsLogin), 500);
         return;
     }
 
@@ -19,15 +26,19 @@ export function initAuth(onAuthenticated) {
                 accessToken = tokenResponse.access_token;
                 localStorage.setItem('napista_token', accessToken);
                 onAuthenticated();
+            } else {
+                alert("Falha ao obter token do Google. Verifique o console.");
             }
         },
     });
 
-    // Tentar pegar token salvo temporariamente (não ideal para longo prazo, mas útil em refresh da aba)
+    // Tentar pegar token salvo temporariamente
     const savedToken = localStorage.getItem('napista_token');
     if (savedToken) {
         accessToken = savedToken;
         onAuthenticated();
+    } else if (onNeedsLogin) {
+        onNeedsLogin();
     }
 }
 
