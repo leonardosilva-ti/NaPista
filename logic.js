@@ -68,7 +68,6 @@ export function calculateTargets(scope = 'day', settings, history = [], currentD
             return item.date >= weekStart && item.date <= weekEnd && item.date !== hojeStr;
         });
     }
-    // No escopo 'day', o historyToConsider fica vazio intencionalmente.
 
     let ganhosBrutosAnteriores = 0;
     let gastosCombustivelAnteriores = 0;
@@ -86,14 +85,12 @@ export function calculateTargets(scope = 'day', settings, history = [], currentD
         gastosExtrasAnteriores += parseFloat(day.expenses || 0);
     });
 
-    // Lucro Liquido Real = Ganho Bruto - Combustivel - Alimentação/Gastos Extras
     const lucroLiquidoAnterior = ganhosBrutosAnteriores - gastosCombustivelAnteriores - gastosExtrasAnteriores;
     
-    // Alvo de Lucro Liquido do Periodo Analisado
     let metaLiquidaPeriodoTotal = metaLiquidaDiariaBase;
     let diasTotaisPeriodo = 1;
     let diasTrabalhadosTotal = 1;
-    let diasRestantesPeriodo = 1;
+    let diasRestantesPeriodo = 1; // Incluindo hoje
 
     if (scope === 'month') {
         metaLiquidaPeriodoTotal = metaLiquidaMensal;
@@ -102,22 +99,21 @@ export function calculateTargets(scope = 'day', settings, history = [], currentD
         diasRestantesPeriodo = diasTotaisPeriodo - historyToConsider.length;
     } else if (scope === 'week') {
         metaLiquidaPeriodoTotal = metaLiquidaSemanalBase;
-        // Se trabalha 20 dias, trabalha ~5 na semana.
-        diasTotaisPeriodo = Math.round(diasTrabalhoMes / 4.33); 
-        if(diasTotaisPeriodo < 1) diasTotaisPeriodo = 1;
-        diasTrabalhadosTotal = historyToConsider.length + 1;
-        diasRestantesPeriodo = diasTotaisPeriodo - historyToConsider.length;
+        // Na semana, contamos os dias até domingo. 
+        // 0 = Dom, 1 = Seg ... 6 = Sab
+        let d = targetDateObj.getDay();
+        diasRestantesPeriodo = d === 0 ? 1 : 8 - d; // Se segunda (1), faltam 7. Terça (2), 6... Dom (0), 1.
     }
 
     if (diasRestantesPeriodo <= 0) diasRestantesPeriodo = 1; // Proteção
 
-    // Se já bateu no período anterior, mas estamos em Month ou Week, a meta de hoje pode cair
+    // O que falta do periodo INTEIRO antes de descontar hoje
     const metaLiquidaRestanteNoPeriodo = metaLiquidaPeriodoTotal - lucroLiquidoAnterior;
 
-    // A meta líquida exata para HOJE, baseada no saldo do período
+    // A meta líquida exata APENAS para HOJE
     let metaLiquidaDiariaAlvo = metaLiquidaRestanteNoPeriodo / diasRestantesPeriodo;
     if (scope === 'day') {
-        metaLiquidaDiariaAlvo = metaLiquidaDiariaBase; // Dia não dilui histórico
+        metaLiquidaDiariaAlvo = metaLiquidaDiariaBase;
     }
 
     // Ler dados de hoje em tempo real
@@ -137,33 +133,31 @@ export function calculateTargets(scope = 'day', settings, history = [], currentD
 
     // Calcular eficiência real de HOJE
     const hojeCustoCombustivel = (hojeKm / hojeConsumo) * hojePrecoL;
-    // O lucro liquido de hoje sofre o desconto dos gastos extras
     const hojeLucroLiquido = hojeGanhoBruto - hojeCustoCombustivel - hojeGastosExtras;
     
-    // Quanto ainda falta bater do lucro de hoje
+    // Quanto falta APENAS para hoje
     const hojeMetaLiquidaFaltante = metaLiquidaDiariaAlvo - hojeLucroLiquido;
 
-    // Se já bateu a meta macro
-    if (metaLiquidaRestanteNoPeriodo <= 0 && (scope === 'week' || scope === 'month')) {
+    // Quanto falta para TODO o período restante (hoje + amanhã + etc)
+    const periodoMetaLiquidaFaltante = metaLiquidaRestanteNoPeriodo - hojeLucroLiquido;
+
+    if (periodoMetaLiquidaFaltante <= 0 && (scope === 'week' || scope === 'month')) {
         return {
             metaAlcancada: true,
-            excedente: Math.abs(metaLiquidaRestanteNoPeriodo + hojeLucroLiquido), // O que sobrou total
+            excedente: Math.abs(periodoMetaLiquidaFaltante),
             metaBrutaPeriodoRestante: 0,
             kmPeriodoRestante: 0,
-            hojeGanhoBruto,
-            hojeKm
+            metaBrutaDiariaSugerida: 0
         };
     }
 
-    // Se já bateu a meta liquida APENAS do dia
-    if (hojeMetaLiquidaFaltante <= 0) {
+    if (hojeMetaLiquidaFaltante <= 0 && scope === 'day') {
         return {
             metaAlcancada: true,
-            excedente: Math.abs(hojeMetaLiquidaFaltante), // O que sobrou hoje
+            excedente: Math.abs(hojeMetaLiquidaFaltante),
             metaBrutaPeriodoRestante: 0,
             kmPeriodoRestante: 0,
-            hojeGanhoBruto,
-            hojeKm
+            metaBrutaDiariaSugerida: 0
         };
     }
 
@@ -176,23 +170,40 @@ export function calculateTargets(scope = 'day', settings, history = [], currentD
         hojeLucroPorKm = lucroLiquidoPorKmBase;
     }
 
-    // Quanto KM falta rodar HOJE
-    const kmFaltanteHoje = hojeMetaLiquidaFaltante / hojeLucroPorKm;
-    
     let rendimentoProjetadoPorKm = (hojeGanhoBruto > 0 && hojeKm > 0) ? hojeRendimentoPorKm : mediaPagamentoKm;
-    const ganhoBrutoFaltanteHoje = kmFaltanteHoje * rendimentoProjetadoPorKm;
 
-    // No dashboard nós mostramos a meta bruta que ele deve bater hoje para o escopo selecionado
-    const metaBrutaDiariaFinal = hojeGanhoBruto + ganhoBrutoFaltanteHoje;
-    const kmDiarioFinal = hojeKm + kmFaltanteHoje;
+    // Se escopo for DAY, calcular só a fatia de hoje
+    if (scope === 'day') {
+        const kmFaltanteHoje = hojeMetaLiquidaFaltante / hojeLucroPorKm;
+        const ganhoBrutoFaltanteHoje = kmFaltanteHoje * rendimentoProjetadoPorKm;
+        const metaBrutaDiariaFinal = hojeGanhoBruto + ganhoBrutoFaltanteHoje;
+        const kmDiarioFinal = hojeKm + kmFaltanteHoje;
 
-    return {
-        metaAlcancada: false,
-        metaBrutaPeriodoRestante: Math.max(0, metaBrutaDiariaFinal),
-        kmPeriodoRestante: Math.max(0, kmDiarioFinal),
-        hojeGanhoBruto,
-        hojeKm
-    };
+        return {
+            metaAlcancada: false,
+            metaBrutaPeriodoRestante: Math.max(0, metaBrutaDiariaFinal),
+            kmPeriodoRestante: Math.max(0, kmDiarioFinal),
+            metaBrutaDiariaSugerida: Math.max(0, metaBrutaDiariaFinal)
+        };
+    } 
+    // Se escopo for WEEK ou MONTH, projetar o bolo INTEIRO usando a eficiência de hoje
+    else {
+        const kmFaltantePeriodo = periodoMetaLiquidaFaltante / hojeLucroPorKm;
+        const ganhoBrutoFaltantePeriodo = kmFaltantePeriodo * rendimentoProjetadoPorKm;
+        
+        // O valor bruto final exigido engloba o que já ganhou hoje + o que falta para todo o período
+        const metaBrutaPeriodoFinal = hojeGanhoBruto + ganhoBrutoFaltantePeriodo;
+        const kmPeriodoFinal = hojeKm + kmFaltantePeriodo;
+
+        const metaBrutaDiariaSugerida = metaBrutaPeriodoFinal / diasRestantesPeriodo;
+
+        return {
+            metaAlcancada: false,
+            metaBrutaPeriodoRestante: Math.max(0, metaBrutaPeriodoFinal),
+            kmPeriodoRestante: Math.max(0, kmPeriodoFinal),
+            metaBrutaDiariaSugerida: Math.max(0, metaBrutaDiariaSugerida)
+        };
+    }
 }
 
 export function getDayStats(history, dateStr) {
