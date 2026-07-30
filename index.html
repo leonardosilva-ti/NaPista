@@ -85,13 +85,25 @@
             </div>
 
             <div class="card text-center" id="card-meta">
-                <h3 class="metric-subtitle">Falta para meta de hoje</h3>
+                <div class="tabs" style="margin-bottom: 12px; font-size: 0.9rem;">
+                    <div class="tab-btn active dash-tab-btn" data-scope="day" style="padding: 8px;">Do dia</div>
+                    <div class="tab-btn dash-tab-btn" data-scope="week" style="padding: 8px;">Da semana</div>
+                    <div class="tab-btn dash-tab-btn" data-scope="month" style="padding: 8px;">Do mês</div>
+                </div>
+                
+                <h3 class="metric-subtitle" id="dash-meta-title">Metas</h3>
                 <div id="dash-falta-hoje" class="metric-large">R$ 0,00</div>
-                <p id="dash-meta-diaria-info" style="font-size: 0.9rem;">Meta do dia: R$ 0,00</p>
+                
+                <div class="d-flex justify-between" style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 8px;">
+                    <span id="dash-total-feito">Feito: R$ 0,00</span>
+                    <span id="dash-media-km">Média: R$ 0,00/km</span>
+                </div>
+                
+                <p id="dash-meta-diaria-info" style="font-size: 0.9rem;">Meta base: R$ 0,00</p>
                 <div class="progress-container">
                     <div id="dash-progress-bar" class="progress-bar"></div>
                 </div>
-                <p id="dash-km-recomendado" style="font-size: 0.85rem; color: var(--accent-secondary);">Recomendado: 0 km hoje</p>
+                <p id="dash-km-recomendado" style="font-size: 0.85rem; color: var(--accent-secondary);">Recomendado: 0 km</p>
             </div>
 
             <h3>Lançamentos de Hoje</h3>
@@ -108,11 +120,15 @@
                         <input type="number" id="dash-km" step="0.1" placeholder="0">
                     </div>
                     <div class="input-group">
-                        <label>Consumo do Dia (KM/L)</label>
+                        <label>Consumo (KM/L)</label>
                         <input type="number" id="dash-consumo-dia" step="0.1" placeholder="Ex: 10">
                     </div>
-                    <div class="input-group" style="grid-column: span 2;">
-                        <label>Gastos (Alimentação, etc)</label>
+                    <div class="input-group">
+                        <label>Preço Litro (R$)</label>
+                        <input type="number" id="dash-preco-litro" step="0.01" placeholder="Ex: 5.50">
+                    </div>
+                    <div class="input-group">
+                        <label>Gastos (Almoço, etc)</label>
                         <input type="number" id="dash-expenses" step="0.01" placeholder="0.00">
                     </div>
                 </div>
