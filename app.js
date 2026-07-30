@@ -218,6 +218,7 @@ function updateDashboardTargets() {
     
     const dashFalta = document.getElementById('dash-falta-hoje');
     const dashMeta = document.getElementById('dash-meta-diaria-info');
+    const dashSugerida = document.getElementById('dash-meta-sugerida');
     const dashKm = document.getElementById('dash-km-recomendado');
     const bar = document.getElementById('dash-progress-bar');
     
@@ -232,6 +233,7 @@ function updateDashboardTargets() {
     if (stats.error) {
         dashFalta.textContent = "Erro!";
         dashMeta.textContent = stats.error;
+        dashSugerida.style.display = 'none';
         return;
     }
 
@@ -239,29 +241,40 @@ function updateDashboardTargets() {
         dashFalta.textContent = `+ R$ ${stats.excedente.toFixed(2)}`;
         dashFalta.className = 'metric-large';
         dashMeta.textContent = "Parabéns, você bateu a meta! 🎉";
+        dashSugerida.style.display = 'none';
         dashKm.textContent = "Uma folga sempre é bem vinda!";
         bar.style.width = '100%';
         bar.style.background = 'var(--accent-secondary)';
     } else {
-        const metaDiariaOriginal = stats.metaBrutaPeriodoRestante;
-        const faltaHoje = metaDiariaOriginal - currentTotalEarned;
+        const metaOriginal = stats.metaBrutaPeriodoRestante;
+        const faltaValor = metaOriginal - currentTotalEarned;
         
-        if (faltaHoje <= 0) {
-            dashFalta.textContent = `+ R$ ${Math.abs(faltaHoje).toFixed(2)}`;
+        if (faltaValor <= 0) {
+            dashFalta.textContent = `+ R$ ${Math.abs(faltaValor).toFixed(2)}`;
             dashFalta.className = 'metric-large';
             dashMeta.textContent = `Parabéns, você bateu a meta! 🎉`;
+            dashSugerida.style.display = 'none';
             bar.style.width = '100%';
             bar.style.background = 'var(--accent-secondary)';
         } else {
-            dashFalta.textContent = `R$ ${faltaHoje.toFixed(2)}`;
+            dashFalta.textContent = `R$ ${faltaValor.toFixed(2)}`;
             dashFalta.className = 'metric-large metric-danger';
             
             let label = 'Meta base diária';
-            if (currentScope === 'week') label = 'Meta base da semana';
-            if (currentScope === 'month') label = 'Meta base do mês';
+            if (currentScope === 'week') label = 'Meta total restante da semana';
+            if (currentScope === 'month') label = 'Meta total restante do mês';
             
-            dashMeta.textContent = `${label}: R$ ${metaDiariaOriginal.toFixed(2)}`;
-            const perc = (currentTotalEarned / metaDiariaOriginal) * 100;
+            dashMeta.textContent = `${label}: R$ ${metaOriginal.toFixed(2)}`;
+            
+            if (currentScope === 'day') {
+                dashSugerida.style.display = 'none';
+            } else {
+                dashSugerida.style.display = 'block';
+                const sLabel = currentScope === 'week' ? 'semana' : 'mês';
+                dashSugerida.textContent = `Para bater a meta da ${sLabel}, sugerimos: R$ ${stats.metaBrutaDiariaSugerida.toFixed(2)} / dia`;
+            }
+            
+            const perc = (currentTotalEarned / metaOriginal) * 100;
             bar.style.width = `${perc}%`;
             bar.style.background = 'var(--accent-primary)';
         }
