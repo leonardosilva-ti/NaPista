@@ -8,12 +8,28 @@ export const defaultData = {
         mediaPrecoCombustivel: 0,
         plataformas: ["Uber", "99", "InDrive", "Particular"]
     },
-    history: [] // [{ date: 'YYYY-MM-DD', earnings: {Uber: 10}, km: 100, consumoL: 10.5, expenses: 20 }]
+    history: []
 };
 
-// Funções de Cálculo
+// Helpers para Datas
+function getWeekStartEnd(dateStr) {
+    const date = new Date(dateStr + 'T12:00:00');
+    const day = date.getDay(); // 0 (Sun) to 6 (Sat)
+    const diffToMonday = date.getDate() - day + (day === 0 ? -6 : 1);
+    
+    const start = new Date(date);
+    start.setDate(diffToMonday);
+    
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    
+    return { 
+        start: start.toISOString().split('T')[0], 
+        end: end.toISOString().split('T')[0] 
+    };
+}
 
-export function calculateDailyTargets(settings, history = [], currentDate = null, currentDayInputs = null) {
+export function calculateTargets(scope = 'day', settings, history = [], currentDate = null, currentDayInputs = null) {
     const { 
         diasTrabalhoMes, 
         metaLiquidaMensal, 
@@ -22,113 +38,160 @@ export function calculateDailyTargets(settings, history = [], currentDate = null
         mediaPrecoCombustivel 
     } = settings;
 
-    // Lucro Líquido Médio Global (Configurações)
+    // Constantes e Metas Base (Perfil)
     const custoCombustivelPorKmBase = mediaPrecoCombustivel / mediaConsumoL;
     const lucroLiquidoPorKmBase = mediaPagamentoKm - custoCombustivelPorKmBase;
-
+    
     if (lucroLiquidoPorKmBase <= 0) {
         return { error: "O custo de combustível médio é maior ou igual ao ganho por KM. Revise suas configurações." };
     }
+
+    const metaLiquidaDiariaBase = metaLiquidaMensal / diasTrabalhoMes;
+    // Semanas médias no mês: 4.33
+    const metaLiquidaSemanalBase = metaLiquidaMensal / 4.33; 
 
     const hojeStr = currentDate || new Date().toISOString().split('T')[0];
     const targetDateObj = new Date(hojeStr + 'T12:00:00');
     const currentMonth = targetDateObj.getMonth();
     const currentYear = targetDateObj.getFullYear();
+    const { start: weekStart, end: weekEnd } = getWeekStartEnd(hojeStr);
 
-    // Filtra o histórico deste mês, EXCLUINDO o dia atual
-    const historyThisMonth = history.filter(item => {
-        const itemDate = new Date(item.date + 'T12:00:00');
-        return itemDate.getMonth() === currentMonth && itemDate.getFullYear() === currentYear && item.date !== hojeStr;
-    });
+    // Filtra histórico conforme o escopo (excluindo hoje)
+    let historyToConsider = [];
+    if (scope === 'month') {
+        historyToConsider = history.filter(item => {
+            const itemDate = new Date(item.date + 'T12:00:00');
+            return itemDate.getMonth() === currentMonth && itemDate.getFullYear() === currentYear && item.date !== hojeStr;
+        });
+    } else if (scope === 'week') {
+        historyToConsider = history.filter(item => {
+            return item.date >= weekStart && item.date <= weekEnd && item.date !== hojeStr;
+        });
+    }
+    // No escopo 'day', o historyToConsider fica vazio intencionalmente.
 
     let ganhosBrutosAnteriores = 0;
     let gastosCombustivelAnteriores = 0;
+    let gastosExtrasAnteriores = 0;
 
-    // Calcular dias anteriores do mês (já fechados)
-    historyThisMonth.forEach(day => {
+    historyToConsider.forEach(day => {
         let dailyEarn = 0;
         for (let p in day.earnings) { dailyEarn += (parseFloat(day.earnings[p]) || 0); }
         ganhosBrutosAnteriores += dailyEarn;
         
         const consumoUsado = parseFloat(day.consumoL) || mediaConsumoL;
-        gastosCombustivelAnteriores += (parseFloat(day.km || 0) / consumoUsado) * mediaPrecoCombustivel;
+        const precoUsado = parseFloat(day.precoL) || mediaPrecoCombustivel;
+        
+        gastosCombustivelAnteriores += (parseFloat(day.km || 0) / consumoUsado) * precoUsado;
+        gastosExtrasAnteriores += parseFloat(day.expenses || 0);
     });
 
-    const lucroLiquidoAnterior = ganhosBrutosAnteriores - gastosCombustivelAnteriores;
+    // Lucro Liquido Real = Ganho Bruto - Combustivel - Alimentação/Gastos Extras
+    const lucroLiquidoAnterior = ganhosBrutosAnteriores - gastosCombustivelAnteriores - gastosExtrasAnteriores;
     
-    // Lucro que falta para bater a meta no resto do mês (incluindo o dia de hoje)
-    const metaLiquidaRestanteMensal = metaLiquidaMensal - lucroLiquidoAnterior;
+    // Alvo de Lucro Liquido do Periodo Analisado
+    let metaLiquidaPeriodoTotal = metaLiquidaDiariaBase;
+    let diasTotaisPeriodo = 1;
+    let diasTrabalhadosTotal = 1;
+    let diasRestantesPeriodo = 1;
 
-    // Quantos dias restam no mês para bater a meta (incluindo hoje)
-    // dias já trabalhados (histórico) + 1 (hoje)
-    let diasTrabalhadosTotal = historyThisMonth.length + 1; 
-    let diasRestantes = diasTrabalhoMes - historyThisMonth.length; 
-    if (diasRestantes <= 0) diasRestantes = 1; // Proteção matemática
+    if (scope === 'month') {
+        metaLiquidaPeriodoTotal = metaLiquidaMensal;
+        diasTotaisPeriodo = diasTrabalhoMes;
+        diasTrabalhadosTotal = historyToConsider.length + 1;
+        diasRestantesPeriodo = diasTotaisPeriodo - historyToConsider.length;
+    } else if (scope === 'week') {
+        metaLiquidaPeriodoTotal = metaLiquidaSemanalBase;
+        // Se trabalha 20 dias, trabalha ~5 na semana.
+        diasTotaisPeriodo = Math.round(diasTrabalhoMes / 4.33); 
+        if(diasTotaisPeriodo < 1) diasTotaisPeriodo = 1;
+        diasTrabalhadosTotal = historyToConsider.length + 1;
+        diasRestantesPeriodo = diasTotaisPeriodo - historyToConsider.length;
+    }
 
-    // A meta líquida alvo estrita para o dia de HOJE
-    const metaLiquidaDiariaAlvo = metaLiquidaRestanteMensal / diasRestantes;
+    if (diasRestantesPeriodo <= 0) diasRestantesPeriodo = 1; // Proteção
+
+    // Se já bateu no período anterior, mas estamos em Month ou Week, a meta de hoje pode cair
+    const metaLiquidaRestanteNoPeriodo = metaLiquidaPeriodoTotal - lucroLiquidoAnterior;
+
+    // A meta líquida exata para HOJE, baseada no saldo do período
+    let metaLiquidaDiariaAlvo = metaLiquidaRestanteNoPeriodo / diasRestantesPeriodo;
+    if (scope === 'day') {
+        metaLiquidaDiariaAlvo = metaLiquidaDiariaBase; // Dia não dilui histórico
+    }
 
     // Ler dados de hoje em tempo real
     let hojeGanhoBruto = 0;
     let hojeKm = 0;
     let hojeConsumo = mediaConsumoL;
+    let hojePrecoL = mediaPrecoCombustivel;
+    let hojeGastosExtras = 0;
 
     if (currentDayInputs) {
         for (let p in currentDayInputs.earnings) { hojeGanhoBruto += (parseFloat(currentDayInputs.earnings[p]) || 0); }
         hojeKm = parseFloat(currentDayInputs.km) || 0;
         hojeConsumo = parseFloat(currentDayInputs.consumoL) || mediaConsumoL;
+        hojePrecoL = parseFloat(currentDayInputs.precoL) || mediaPrecoCombustivel;
+        hojeGastosExtras = parseFloat(currentDayInputs.expenses) || 0;
     }
 
     // Calcular eficiência real de HOJE
-    const hojeCustoCombustivel = (hojeKm / hojeConsumo) * mediaPrecoCombustivel;
-    const hojeLucroLiquido = hojeGanhoBruto - hojeCustoCombustivel;
+    const hojeCustoCombustivel = (hojeKm / hojeConsumo) * hojePrecoL;
+    // O lucro liquido de hoje sofre o desconto dos gastos extras
+    const hojeLucroLiquido = hojeGanhoBruto - hojeCustoCombustivel - hojeGastosExtras;
     
+    // Quanto ainda falta bater do lucro de hoje
     const hojeMetaLiquidaFaltante = metaLiquidaDiariaAlvo - hojeLucroLiquido;
 
-    if (metaLiquidaRestanteMensal <= 0) {
+    // Se já bateu a meta macro
+    if (metaLiquidaRestanteNoPeriodo <= 0 && (scope === 'week' || scope === 'month')) {
         return {
             metaAlcancada: true,
-            excedenteMensal: Math.abs(metaLiquidaRestanteMensal),
-            metaBrutaDiaria: 0,
-            kmDiario: 0
+            excedente: Math.abs(metaLiquidaRestanteNoPeriodo + hojeLucroLiquido), // O que sobrou total
+            metaBrutaPeriodoRestante: 0,
+            kmPeriodoRestante: 0,
+            hojeGanhoBruto,
+            hojeKm
         };
     }
 
-    // Se já bateu a meta liquida do dia
+    // Se já bateu a meta liquida APENAS do dia
     if (hojeMetaLiquidaFaltante <= 0) {
         return {
-            metaAlcancada: false,
-            metaBrutaDiaria: hojeGanhoBruto, // Faz a barra ficar em 100% exatamente
-            kmDiario: 0
+            metaAlcancada: true,
+            excedente: Math.abs(hojeMetaLiquidaFaltante), // O que sobrou hoje
+            metaBrutaPeriodoRestante: 0,
+            kmPeriodoRestante: 0,
+            hojeGanhoBruto,
+            hojeKm
         };
     }
 
     // Calcular as médias atuais do dia para projetar o que falta
     const hojeRendimentoPorKm = (hojeGanhoBruto > 0 && hojeKm > 0) ? (hojeGanhoBruto / hojeKm) : mediaPagamentoKm;
-    const hojeCustoPorKm = mediaPrecoCombustivel / hojeConsumo;
+    const hojeCustoPorKm = hojePrecoL / hojeConsumo;
     let hojeLucroPorKm = hojeRendimentoPorKm - hojeCustoPorKm;
 
-    // Se o cara está pagando para trabalhar hoje (lucro negativo), 
-    // ou ainda não fez nada (rendimento zero), voltamos para a média das configs para ter uma estimativa sã
     if (hojeLucroPorKm <= 0) {
         hojeLucroPorKm = lucroLiquidoPorKmBase;
     }
 
-    // Quanto KM falta rodar HOJE, com base na eficiência de HOJE, para atingir o que falta da meta líquida de HOJE
+    // Quanto KM falta rodar HOJE
     const kmFaltanteHoje = hojeMetaLiquidaFaltante / hojeLucroPorKm;
     
-    // Quanto de ganho bruto isso representa
-    // Usamos o rendimento por km de hoje. Se ele não fez nada, vai usar o mediaPagamentoKm
     let rendimentoProjetadoPorKm = (hojeGanhoBruto > 0 && hojeKm > 0) ? hojeRendimentoPorKm : mediaPagamentoKm;
     const ganhoBrutoFaltanteHoje = kmFaltanteHoje * rendimentoProjetadoPorKm;
 
+    // No dashboard nós mostramos a meta bruta que ele deve bater hoje para o escopo selecionado
     const metaBrutaDiariaFinal = hojeGanhoBruto + ganhoBrutoFaltanteHoje;
     const kmDiarioFinal = hojeKm + kmFaltanteHoje;
 
     return {
         metaAlcancada: false,
-        metaBrutaDiaria: Math.max(0, metaBrutaDiariaFinal),
-        kmDiario: Math.max(0, kmDiarioFinal)
+        metaBrutaPeriodoRestante: Math.max(0, metaBrutaDiariaFinal),
+        kmPeriodoRestante: Math.max(0, kmDiarioFinal),
+        hojeGanhoBruto,
+        hojeKm
     };
 }
 
@@ -139,7 +202,8 @@ export function getDayStats(history, dateStr) {
         return {
             totalEarned: 0,
             km: 0,
-            consumoL: '', // vazio para puxar a média
+            consumoL: '',
+            precoL: '',
             expenses: 0,
             earnings: {}
         };
@@ -152,6 +216,7 @@ export function getDayStats(history, dateStr) {
         totalEarned,
         km: parseFloat(todayData.km || 0),
         consumoL: todayData.consumoL ? parseFloat(todayData.consumoL) : '',
+        precoL: todayData.precoL ? parseFloat(todayData.precoL) : '',
         expenses: parseFloat(todayData.expenses || 0),
         earnings: todayData.earnings || {}
     };
