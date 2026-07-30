@@ -1,9 +1,10 @@
 import { initAuth, login, logout } from './auth.js';
 import { findDataFile, readData, saveData, deleteData } from './drive.js';
-import { defaultData, calculateDailyTargets, getDayStats } from './logic.js';
+import { defaultData, calculateTargets, getDayStats } from './logic.js';
 
 let appData = null;
 let fileId = null;
+let currentScope = 'day'; // day, week, month
 
 // UI Elements
 const screens = document.querySelectorAll('.screen');
@@ -159,6 +160,18 @@ function initDashboard() {
         });
         document.getElementById('dash-km').addEventListener('input', updateDashboardTargets);
         document.getElementById('dash-consumo-dia').addEventListener('input', updateDashboardTargets);
+        document.getElementById('dash-preco-litro').addEventListener('input', updateDashboardTargets);
+        document.getElementById('dash-expenses').addEventListener('input', updateDashboardTargets);
+
+        // Scope Tabs
+        document.querySelectorAll('.dash-tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.dash-tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentScope = btn.dataset.scope;
+                updateDashboardTargets();
+            });
+        });
 
         isDashboardInitialized = true;
     }
@@ -175,6 +188,7 @@ function loadDashboardData() {
 
     document.getElementById('dash-km').value = dayStats.km || '';
     document.getElementById('dash-consumo-dia').value = dayStats.consumoL || '';
+    document.getElementById('dash-preco-litro').value = dayStats.precoL || '';
     document.getElementById('dash-expenses').value = dayStats.expenses || '';
     
     updateDashboardTargets();
@@ -184,7 +198,7 @@ function updateDashboardTargets() {
     const selectedDate = dateInput.value || new Date().toISOString().split('T')[0];
     
     // Ler os dados provisórios digitados
-    const currentDayInputs = { earnings: {}, km: 0, consumoL: 0 };
+    const currentDayInputs = { earnings: {}, km: 0, consumoL: 0, precoL: 0, expenses: 0 };
     let currentTotalEarned = 0;
     
     document.querySelectorAll('.plat-input').forEach(inp => {
@@ -197,14 +211,23 @@ function updateDashboardTargets() {
     
     currentDayInputs.km = parseFloat(document.getElementById('dash-km').value) || 0;
     currentDayInputs.consumoL = parseFloat(document.getElementById('dash-consumo-dia').value) || appData.settings.mediaConsumoL;
+    currentDayInputs.precoL = parseFloat(document.getElementById('dash-preco-litro').value) || appData.settings.mediaPrecoCombustivel;
+    currentDayInputs.expenses = parseFloat(document.getElementById('dash-expenses').value) || 0;
     
-    // Recalcula passando o histórico e as informações que estão sendo preenchidas agora (para deduzir o combustivel)
-    const stats = calculateDailyTargets(appData.settings, appData.history, selectedDate, currentDayInputs);
+    const stats = calculateTargets(currentScope, appData.settings, appData.history, selectedDate, currentDayInputs);
     
     const dashFalta = document.getElementById('dash-falta-hoje');
     const dashMeta = document.getElementById('dash-meta-diaria-info');
     const dashKm = document.getElementById('dash-km-recomendado');
     const bar = document.getElementById('dash-progress-bar');
+    
+    // Atualiza subtitulos da UI de forma reativa
+    const mediaFormatada = currentDayInputs.km > 0 && currentTotalEarned > 0 
+        ? (currentTotalEarned / currentDayInputs.km).toFixed(2) 
+        : '0.00';
+        
+    document.getElementById('dash-total-feito').textContent = `Feito: R$ ${currentTotalEarned.toFixed(2)}`;
+    document.getElementById('dash-media-km').textContent = `Média: R$ ${mediaFormatada}/km`;
 
     if (stats.error) {
         dashFalta.textContent = "Erro!";
@@ -213,31 +236,36 @@ function updateDashboardTargets() {
     }
 
     if (stats.metaAlcancada) {
-        dashFalta.textContent = `+ R$ ${stats.excedenteMensal.toFixed(2)}`;
+        dashFalta.textContent = `+ R$ ${stats.excedente.toFixed(2)}`;
         dashFalta.className = 'metric-large';
-        dashMeta.textContent = "Meta Mensal Atingida! 🎉";
+        dashMeta.textContent = "Parabéns, você bateu a meta! 🎉";
         dashKm.textContent = "Uma folga sempre é bem vinda!";
         bar.style.width = '100%';
         bar.style.background = 'var(--accent-secondary)';
     } else {
-        const metaDiariaOriginal = stats.metaBrutaDiaria;
+        const metaDiariaOriginal = stats.metaBrutaPeriodoRestante;
         const faltaHoje = metaDiariaOriginal - currentTotalEarned;
         
         if (faltaHoje <= 0) {
             dashFalta.textContent = `+ R$ ${Math.abs(faltaHoje).toFixed(2)}`;
             dashFalta.className = 'metric-large';
-            dashMeta.textContent = `Meta do dia batida (Excedente)`;
+            dashMeta.textContent = `Parabéns, você bateu a meta! 🎉`;
             bar.style.width = '100%';
             bar.style.background = 'var(--accent-secondary)';
         } else {
             dashFalta.textContent = `R$ ${faltaHoje.toFixed(2)}`;
             dashFalta.className = 'metric-large metric-danger';
-            dashMeta.textContent = `Meta bruta do dia: R$ ${metaDiariaOriginal.toFixed(2)}`;
+            
+            let label = 'Meta base diária';
+            if (currentScope === 'week') label = 'Meta base da semana';
+            if (currentScope === 'month') label = 'Meta base do mês';
+            
+            dashMeta.textContent = `${label}: R$ ${metaDiariaOriginal.toFixed(2)}`;
             const perc = (currentTotalEarned / metaDiariaOriginal) * 100;
             bar.style.width = `${perc}%`;
             bar.style.background = 'var(--accent-primary)';
         }
-        dashKm.textContent = `Recomendado rodar: ${stats.kmDiario.toFixed(0)} km hoje`;
+        dashKm.textContent = `Recomendado rodar: ${stats.kmPeriodoRestante.toFixed(0)} km`;
     }
 }
 
@@ -246,7 +274,7 @@ document.getElementById('btn-save-day').addEventListener('click', async () => {
     let dayData = appData.history.find(h => h.date === selectedDate);
     
     if (!dayData) {
-        dayData = { date: selectedDate, earnings: {}, km: 0, consumoL: 0, expenses: 0 };
+        dayData = { date: selectedDate, earnings: {}, km: 0, consumoL: 0, precoL: 0, expenses: 0 };
         appData.history.push(dayData);
     }
 
@@ -262,6 +290,10 @@ document.getElementById('btn-save-day').addEventListener('click', async () => {
     if (consDia) dayData.consumoL = parseFloat(consDia);
     else delete dayData.consumoL;
     
+    const precoDia = document.getElementById('dash-preco-litro').value;
+    if (precoDia) dayData.precoL = parseFloat(precoDia);
+    else delete dayData.precoL;
+    
     dayData.expenses = parseFloat(document.getElementById('dash-expenses').value) || 0;
 
     document.getElementById('btn-save-day').textContent = "Salvando...";
@@ -269,7 +301,6 @@ document.getElementById('btn-save-day').addEventListener('click', async () => {
         fileId = await saveData(fileId, appData);
         document.getElementById('btn-save-day').textContent = "Salvo!";
         setTimeout(() => { document.getElementById('btn-save-day').textContent = "Salvar Lançamentos"; }, 2000);
-        // Atualiza a tela após salvar
         updateDashboardTargets();
     } catch(e) {
         alert("Erro ao salvar.");
@@ -279,18 +310,20 @@ document.getElementById('btn-save-day').addEventListener('click', async () => {
 
 // --- REPORTS SCREEN ---
 document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        renderReports(btn.dataset.tab);
-    });
+    if(!btn.classList.contains('dash-tab-btn')){
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tab-btn:not(.dash-tab-btn)').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderReports(btn.dataset.tab);
+        });
+    }
 });
 
 function renderReports(tabId) {
     const content = document.getElementById('report-content');
     let html = '';
     
-    const history = [...appData.history].sort((a,b) => new Date(b.date) - new Date(a.date)); // Do mais recente
+    const history = [...appData.history].sort((a,b) => new Date(b.date) - new Date(a.date));
     
     if (history.length === 0) {
         content.innerHTML = '<p class="text-center">Nenhum dado registrado ainda.</p>';
@@ -308,7 +341,7 @@ function renderReports(tabId) {
                         <span style="color:var(--accent-secondary)">R$ ${total.toFixed(2)}</span>
                     </div>
                     <div style="font-size: 0.8rem; color: var(--text-secondary);">
-                        KM: ${h.km} | Consumo: ${h.consumoL ? h.consumoL+' KM/L' : 'Média'} | Gastos: R$ ${h.expenses}
+                        KM: ${h.km} | PreçoL: ${h.precoL ? 'R$'+h.precoL : 'Média'} | Gastos: R$ ${h.expenses}
                     </div>
                 </div>
             `;
@@ -322,7 +355,7 @@ function renderReports(tabId) {
 
 // --- PROFILE SCREEN ---
 document.getElementById('btn-reconfig').addEventListener('click', () => {
-    isDashboardInitialized = false; // Força recriar inputs se alterar apps
+    isDashboardInitialized = false; 
     renderSetup();
     showScreen('setup-screen');
 });
