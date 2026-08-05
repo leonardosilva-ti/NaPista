@@ -350,14 +350,8 @@ function updateDashboardTargets() {
     const dashSugerida = document.getElementById('dash-meta-sugerida');
     const dashKm = document.getElementById('dash-km-recomendado');
     const bar = document.getElementById('dash-progress-bar');
-    
-    // Atualiza subtitulos da UI
-    const mediaFormatada = currentDayInputs.km > 0 && currentTotalEarned > 0 
-        ? (currentTotalEarned / currentDayInputs.km).toFixed(2) 
-        : '0.00';
-        
-    document.getElementById('dash-total-feito').textContent = `Feito: R$ ${currentTotalEarned.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
-    document.getElementById('dash-media-km').textContent = `Média: R$ ${mediaFormatada.replace('.', ',')}/km`;
+    const elBruto = document.getElementById('dash-total-bruto');
+    const elLiquido = document.getElementById('dash-total-liquido');
 
     if (stats.error) {
         dashFalta.textContent = "Erro!";
@@ -366,6 +360,12 @@ function updateDashboardTargets() {
         return;
     }
 
+    // Atualiza bloco Ganhos Bruto/Líquido com os totais do período completo
+    const bruto = stats.periodoGanhoBruto || 0;
+    const liquido = stats.periodoLucroLiquido || 0;
+    elBruto.textContent = `R$ ${bruto.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
+    elLiquido.textContent = `R$ ${liquido.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
+    elLiquido.style.color = liquido >= 0 ? 'var(--accent-secondary)' : 'var(--accent-danger)';
     if (stats.metaAlcancada) {
         dashFalta.textContent = `+ R$ ${stats.excedente.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
         dashFalta.className = 'metric-large';
