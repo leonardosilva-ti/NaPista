@@ -54,7 +54,7 @@ const reportsScreen = document.getElementById('reports-screen');
 const profileScreen = document.getElementById('profile-screen');
 
 // Navigation
-document.querySelectorAll('.nav-btn').forEach(btn => {
+document.querySelectorAll('.nav-btn, .nav-btn-text').forEach(btn => {
     btn.addEventListener('click', () => showScreen(btn.dataset.target));
 });
 
