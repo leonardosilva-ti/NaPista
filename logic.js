@@ -134,6 +134,12 @@ export function calculateTargets(scope = 'day', settings, history = [], currentD
     // Calcular eficiência real de HOJE
     const hojeCustoCombustivel = (hojeKm / hojeConsumo) * hojePrecoL;
     const hojeLucroLiquido = hojeGanhoBruto - hojeCustoCombustivel - hojeGastosExtras;
+
+    // ── Totais do PERÍODO completo (histórico + hoje) para exibição ──
+    const periodoGanhoBruto = ganhosBrutosAnteriores + hojeGanhoBruto;
+    const periodoCustoCombustivel = gastosCombustivelAnteriores + hojeCustoCombustivel;
+    const periodoGastosExtras = gastosExtrasAnteriores + hojeGastosExtras;
+    const periodoLucroLiquido = periodoGanhoBruto - periodoCustoCombustivel - periodoGastosExtras;
     
     // Quanto falta APENAS para hoje
     const hojeMetaLiquidaFaltante = metaLiquidaDiariaAlvo - hojeLucroLiquido;
@@ -147,7 +153,9 @@ export function calculateTargets(scope = 'day', settings, history = [], currentD
             excedente: Math.abs(periodoMetaLiquidaFaltante),
             metaBrutaPeriodoRestante: 0,
             kmPeriodoRestante: 0,
-            metaBrutaDiariaSugerida: 0
+            metaBrutaDiariaSugerida: 0,
+            periodoGanhoBruto,
+            periodoLucroLiquido
         };
     }
 
@@ -157,7 +165,9 @@ export function calculateTargets(scope = 'day', settings, history = [], currentD
             excedente: Math.abs(hojeMetaLiquidaFaltante),
             metaBrutaPeriodoRestante: 0,
             kmPeriodoRestante: 0,
-            metaBrutaDiariaSugerida: 0
+            metaBrutaDiariaSugerida: 0,
+            periodoGanhoBruto,
+            periodoLucroLiquido
         };
     }
 
@@ -183,7 +193,9 @@ export function calculateTargets(scope = 'day', settings, history = [], currentD
             metaAlcancada: false,
             metaBrutaPeriodoRestante: Math.max(0, metaBrutaDiariaFinal),
             kmPeriodoRestante: Math.max(0, kmDiarioFinal),
-            metaBrutaDiariaSugerida: Math.max(0, metaBrutaDiariaFinal)
+            metaBrutaDiariaSugerida: Math.max(0, metaBrutaDiariaFinal),
+            periodoGanhoBruto,
+            periodoLucroLiquido
         };
     } 
     // Se escopo for WEEK ou MONTH, projetar o bolo INTEIRO usando a eficiência de hoje
@@ -191,7 +203,6 @@ export function calculateTargets(scope = 'day', settings, history = [], currentD
         const kmFaltantePeriodo = periodoMetaLiquidaFaltante / hojeLucroPorKm;
         const ganhoBrutoFaltantePeriodo = kmFaltantePeriodo * rendimentoProjetadoPorKm;
         
-        // O valor bruto final exigido engloba o que já ganhou hoje + o que falta para todo o período
         const metaBrutaPeriodoFinal = hojeGanhoBruto + ganhoBrutoFaltantePeriodo;
         const kmPeriodoFinal = hojeKm + kmFaltantePeriodo;
 
@@ -201,7 +212,9 @@ export function calculateTargets(scope = 'day', settings, history = [], currentD
             metaAlcancada: false,
             metaBrutaPeriodoRestante: Math.max(0, metaBrutaPeriodoFinal),
             kmPeriodoRestante: Math.max(0, kmPeriodoFinal),
-            metaBrutaDiariaSugerida: Math.max(0, metaBrutaDiariaSugerida)
+            metaBrutaDiariaSugerida: Math.max(0, metaBrutaDiariaSugerida),
+            periodoGanhoBruto,
+            periodoLucroLiquido
         };
     }
 }
