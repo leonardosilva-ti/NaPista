@@ -77,8 +77,12 @@
         <!-- DASHBOARD SCREEN -->
         <div id="dashboard-screen" class="screen">
             <div class="d-flex justify-between align-center mb-4">
-                <input type="date" id="dash-date" style="padding: 8px; border-radius: 8px; background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid var(--border-color); outline: none;">
-                <div>
+                <div class="date-navigator d-flex align-center justify-between" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 6px 10px; width: 100%; max-width: 280px;">
+                    <button id="btn-prev-date" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer; padding:0 10px;">&lt;</button>
+                    <div id="dash-date-display" style="font-weight:bold; font-size:0.9rem; text-align:center; flex:1;">&lt; Hoje &gt;</div>
+                    <button id="btn-next-date" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer; padding:0 10px;">&gt;</button>
+                </div>
+                <div class="d-flex" style="margin-left: 10px; gap: 8px;">
                     <button class="nav-btn" data-target="reports-screen">📊</button>
                     <button class="nav-btn" data-target="profile-screen">⚙️</button>
                 </div>
@@ -108,33 +112,35 @@
                 <p id="dash-km-recomendado" style="font-size: 0.85rem; color: var(--accent-secondary);">Recomendado: 0 km</p>
             </div>
 
-            <h3>Lançamentos de Hoje</h3>
-            <div class="card">
-                <div id="dash-platform-inputs">
-                    <!-- Gerado via JS -->
+            <div id="dash-lancamentos-section">
+                <h3>Lançamentos de Hoje</h3>
+                <div class="card">
+                    <div id="dash-platform-inputs">
+                        <!-- Gerado via JS -->
+                    </div>
+                    
+                    <hr style="border-color: var(--border-color); margin: 20px 0;">
+                    
+                    <div class="grid grid-2">
+                        <div class="input-group">
+                            <label>KM Rodado</label>
+                            <input type="number" id="dash-km" step="0.1" placeholder="0">
+                        </div>
+                        <div class="input-group">
+                            <label>Consumo (KM/L)</label>
+                            <input type="number" id="dash-consumo-dia" step="0.1" placeholder="Ex: 10">
+                        </div>
+                        <div class="input-group">
+                            <label>Preço Litro (R$)</label>
+                            <input type="text" inputmode="numeric" id="dash-preco-litro" class="currency-mask" placeholder="Ex: 5,50">
+                        </div>
+                        <div class="input-group">
+                            <label>Gastos (Almoço, etc)</label>
+                            <input type="text" inputmode="numeric" id="dash-expenses" class="currency-mask" placeholder="0,00">
+                        </div>
+                    </div>
+                    <button id="btn-save-day" class="btn btn-primary">Salvar Lançamentos</button>
                 </div>
-                
-                <hr style="border-color: var(--border-color); margin: 20px 0;">
-                
-                <div class="grid grid-2">
-                    <div class="input-group">
-                        <label>KM Rodado</label>
-                        <input type="number" id="dash-km" step="0.1" placeholder="0">
-                    </div>
-                    <div class="input-group">
-                        <label>Consumo (KM/L)</label>
-                        <input type="number" id="dash-consumo-dia" step="0.1" placeholder="Ex: 10">
-                    </div>
-                    <div class="input-group">
-                        <label>Preço Litro (R$)</label>
-                        <input type="number" id="dash-preco-litro" step="0.01" placeholder="Ex: 5.50">
-                    </div>
-                    <div class="input-group">
-                        <label>Gastos (Almoço, etc)</label>
-                        <input type="number" id="dash-expenses" step="0.01" placeholder="0.00">
-                    </div>
-                </div>
-                <button id="btn-save-day" class="btn btn-primary">Salvar Lançamentos</button>
             </div>
         </div>
 
