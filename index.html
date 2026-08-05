@@ -76,25 +76,30 @@
 
         <!-- DASHBOARD SCREEN -->
         <div id="dashboard-screen" class="screen">
-            <div class="d-flex justify-between align-center mb-4">
-                <div class="date-navigator d-flex align-center justify-between" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 6px 10px; width: 100%; max-width: 280px;">
-                    <button id="btn-prev-date" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer; padding:0 10px;">&lt;</button>
+
+            <!-- Botões de navegação superiores -->
+            <div class="d-flex justify-between" style="gap: 10px; margin-bottom: 14px;">
+                <button class="btn btn-secondary nav-btn-text" data-target="reports-screen" style="flex:1; padding: 10px; font-size: 0.85rem; border-radius: 10px;">📊 Relatórios</button>
+                <button class="btn btn-secondary nav-btn-text" data-target="profile-screen" style="flex:1; padding: 10px; font-size: 0.85rem; border-radius: 10px;">⚙️ Configurações</button>
+            </div>
+
+            <!-- Abas de período centralizadas -->
+            <div class="tabs" style="margin-bottom: 12px; font-size: 0.9rem;">
+                <div class="tab-btn active dash-tab-btn" data-scope="day" style="padding: 8px;">Do dia</div>
+                <div class="tab-btn dash-tab-btn" data-scope="week" style="padding: 8px;">Da semana</div>
+                <div class="tab-btn dash-tab-btn" data-scope="month" style="padding: 8px;">Do mês</div>
+            </div>
+
+            <!-- Navegador de datas centralizado -->
+            <div class="d-flex justify-center mb-4">
+                <div class="date-navigator d-flex align-center justify-between" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 6px 10px; width: 100%;">
+                    <button id="btn-prev-date" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer; padding:0 12px;">&lt;</button>
                     <div id="dash-date-display" style="font-weight:bold; font-size:0.9rem; text-align:center; flex:1;">&lt; Hoje &gt;</div>
-                    <button id="btn-next-date" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer; padding:0 10px;">&gt;</button>
-                </div>
-                <div class="d-flex" style="margin-left: 10px; gap: 8px;">
-                    <button class="nav-btn" data-target="reports-screen">📊</button>
-                    <button class="nav-btn" data-target="profile-screen">⚙️</button>
+                    <button id="btn-next-date" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer; padding:0 12px;">&gt;</button>
                 </div>
             </div>
 
             <div class="card text-center" id="card-meta">
-                <div class="tabs" style="margin-bottom: 12px; font-size: 0.9rem;">
-                    <div class="tab-btn active dash-tab-btn" data-scope="day" style="padding: 8px;">Do dia</div>
-                    <div class="tab-btn dash-tab-btn" data-scope="week" style="padding: 8px;">Da semana</div>
-                    <div class="tab-btn dash-tab-btn" data-scope="month" style="padding: 8px;">Do mês</div>
-                </div>
-                
                 <h3 class="metric-subtitle" id="dash-meta-title">Metas</h3>
                 <div id="dash-falta-hoje" class="metric-large">R$ 0,00</div>
                 
