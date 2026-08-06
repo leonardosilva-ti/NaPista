@@ -7,16 +7,23 @@ let fileId = null;
 let currentScope = 'day'; // day, week, month
 let currentSelectedDate = new Date(); 
 
+// Para reverter à última data selecionada pelo usuário quando voltar ao escopo "day"
+let lastUserSelectedDate = null; 
+
+// Lista de Despesas (descrição e valor) temporárias do dia selecionado
+let currentExpensesList = [];
+
+// Lista global de plataformas pré-cadastradas para seleção
+const PRESETS_PLATFORMS = ["Uber", "99 Drive (antigo 99)", "InDrive", "Particular", "Shoppe", "Mercado Livre"];
+
 // Helpers de Fuso Horário e Datas
 function getTodayDateString() {
-    // Retorna a data no fuso de Brasilia (UTC-3), resolvendo a virada prematura
     const d = new Date();
     const str = d.toLocaleString('en-CA', { timeZone: 'America/Sao_Paulo' }); // YYYY-MM-DD
     return str.split(',')[0];
 }
 
 function getSelectedDateString() {
-    // Formata a currentSelectedDate como YYYY-MM-DD
     const yyyy = currentSelectedDate.getFullYear();
     const mm = String(currentSelectedDate.getMonth() + 1).padStart(2, '0');
     const dd = String(currentSelectedDate.getDate()).padStart(2, '0');
@@ -27,13 +34,12 @@ function getSelectedDateString() {
 function parseCurrency(val) {
     if (!val) return 0;
     if (typeof val === 'number') return val;
-    // Tira os pontos de milhar e troca virgula por ponto
     const clearStr = val.toString().replace(/\./g, '').replace(',', '.');
     return parseFloat(clearStr) || 0;
 }
 
 function applyCurrencyMask(e) {
-    let val = e.target.value.replace(/\D/g, ''); // só numeros
+    let val = e.target.value.replace(/\D/g, '');
     if (val === '') {
         e.target.value = '';
         updateDashboardTargets();
@@ -44,14 +50,8 @@ function applyCurrencyMask(e) {
     updateDashboardTargets();
 }
 
-// UI Elements
+// UI Screens
 const screens = document.querySelectorAll('.screen');
-const loadingScreen = document.getElementById('loading-screen');
-const loginScreen = document.getElementById('login-screen');
-const setupScreen = document.getElementById('setup-screen');
-const dashboardScreen = document.getElementById('dashboard-screen');
-const reportsScreen = document.getElementById('reports-screen');
-const profileScreen = document.getElementById('profile-screen');
 
 // Navigation
 document.querySelectorAll('.nav-btn, .nav-btn-text').forEach(btn => {
@@ -82,7 +82,7 @@ async function onAuthenticated() {
         fileId = await findDataFile();
         if (fileId) {
             appData = await readData(fileId);
-            if (!appData || !appData.settings || appData.settings.diasTrabalhoMes === 0) {
+            if (!appData || !appData.settings || !appData.settings.plataformas) {
                 renderSetup();
                 showScreen('setup-screen');
             } else {
@@ -90,6 +90,8 @@ async function onAuthenticated() {
             }
         } else {
             appData = JSON.parse(JSON.stringify(defaultData));
+            // No primeiro acesso, garantir que a lista venha vazia para o usuário escolher
+            appData.settings.plataformas = [];
             renderSetup();
             showScreen('setup-screen');
         }
@@ -104,7 +106,8 @@ async function onAuthenticated() {
 let tempPlatforms = [];
 
 function renderSetup() {
-    tempPlatforms = appData.settings.plataformas || [...defaultData.settings.plataformas];
+    // Configurações iniciais
+    tempPlatforms = appData.settings.plataformas ? [...appData.settings.plataformas] : [];
     
     document.getElementById('setup-dias').value = appData.settings.diasTrabalhoMes || '';
     document.getElementById('setup-meta').value = appData.settings.metaLiquidaMensal || '';
@@ -112,16 +115,33 @@ function renderSetup() {
     document.getElementById('setup-consumo').value = appData.settings.mediaConsumoL || '';
     document.getElementById('setup-preco-comb').value = appData.settings.mediaPrecoCombustivel || '';
     
+    // Registrar os botões de controle do modal de apps
+    const btnSelect = document.getElementById('btn-select-apps-modal');
+    btnSelect.onclick = openAppsSelectionModal;
+    
+    const btnClose = document.getElementById('btn-close-apps-modal');
+    btnClose.onclick = closeAppsSelectionModal;
+
+    const btnAddOther = document.getElementById('btn-modal-add-other');
+    btnAddOther.onclick = addOtherPlatformFromModal;
+
     renderPlatformsList();
 }
 
 function renderPlatformsList() {
     const list = document.getElementById('setup-platforms-list');
     list.innerHTML = '';
+    
+    if (tempPlatforms.length === 0) {
+        list.innerHTML = `<span style="font-size:0.9rem; color:var(--text-secondary); font-style:italic;">Nenhum selecionado. Clique no botão acima para adicionar.</span>`;
+        return;
+    }
+    
     tempPlatforms.forEach((p, idx) => {
         const div = document.createElement('div');
         div.className = 'platform-tag active';
-        div.innerHTML = `${p} <span style="margin-left:8px; font-weight:bold; color:var(--accent-danger)">x</span>`;
+        div.style.margin = '4px';
+        div.innerHTML = `${p} <span style="margin-left:8px; font-weight:bold; color:var(--accent-danger); cursor:pointer;">x</span>`;
         div.onclick = () => {
             tempPlatforms.splice(idx, 1);
             renderPlatformsList();
@@ -130,14 +150,67 @@ function renderPlatformsList() {
     });
 }
 
-document.getElementById('btn-add-platform').addEventListener('click', () => {
-    const inp = document.getElementById('setup-new-platform');
-    if (inp.value.trim()) {
-        tempPlatforms.push(inp.value.trim());
+function openAppsSelectionModal() {
+    const modal = document.getElementById('apps-selection-modal');
+    const container = document.getElementById('modal-apps-list');
+    container.innerHTML = '';
+    
+    // Lista unificada dos presets + qualquer app extra já cadastrado que não esteja no preset
+    const allOptions = [...PRESETS_PLATFORMS];
+    tempPlatforms.forEach(p => {
+        if (!allOptions.includes(p)) {
+            allOptions.push(p);
+        }
+    });
+
+    allOptions.forEach(p => {
+        const label = document.createElement('label');
+        label.style.display = 'flex';
+        label.style.alignItems = 'center';
+        label.style.gap = '10px';
+        label.style.fontSize = '1.05rem';
+        label.style.cursor = 'pointer';
+        label.style.padding = '6px 0';
+
+        const isChecked = tempPlatforms.includes(p);
+        label.innerHTML = `
+            <input type="checkbox" class="modal-app-checkbox" value="${p}" ${isChecked ? 'checked' : ''} style="width:20px; height:20px; cursor:pointer;">
+            <span>${p}</span>
+        `;
+        container.appendChild(label);
+    });
+
+    modal.style.display = 'flex';
+}
+
+function addOtherPlatformFromModal() {
+    const inp = document.getElementById('modal-other-app-name');
+    const value = inp.value.trim();
+    if (value) {
+        // Adiciona à lista temporária diretamente
+        if (!tempPlatforms.includes(value)) {
+            tempPlatforms.push(value);
+        }
         inp.value = '';
-        renderPlatformsList();
+        // Reabre/atualiza modal
+        openAppsSelectionModal();
     }
-});
+}
+
+function closeAppsSelectionModal() {
+    const modal = document.getElementById('apps-selection-modal');
+    
+    // Coleta todos os selecionados
+    const checkedBoxes = document.querySelectorAll('.modal-app-checkbox:checked');
+    const selected = [];
+    checkedBoxes.forEach(box => {
+        selected.push(box.value);
+    });
+
+    tempPlatforms = selected;
+    modal.style.display = 'none';
+    renderPlatformsList();
+}
 
 document.getElementById('btn-finish-setup').addEventListener('click', async () => {
     const dias = parseInt(document.getElementById('setup-dias').value);
@@ -147,7 +220,7 @@ document.getElementById('btn-finish-setup').addEventListener('click', async () =
     const pre = parseFloat(document.getElementById('setup-preco-comb').value);
 
     if (!dias || !meta || !pag || !cons || !pre || tempPlatforms.length === 0) {
-        alert("Preencha todos os campos e adicione pelo menos uma plataforma.");
+        alert("Preencha todos os campos e selecione pelo menos uma empresa/aplicativo.");
         return;
     }
 
@@ -163,6 +236,8 @@ document.getElementById('btn-finish-setup').addEventListener('click', async () =
     showScreen('loading-screen');
     try {
         fileId = await saveData(fileId, appData);
+        // Reset da inicialização para carregar os inputs corretos
+        isDashboardInitialized = false;
         showScreen('dashboard-screen');
     } catch (e) {
         console.error(e);
@@ -175,21 +250,113 @@ let isDashboardInitialized = false;
 
 function initDashboard() {
     if (!isDashboardInitialized) {
-        
         // Define a data atual em Brasilia
         const todayParts = getTodayDateString().split('-');
         currentSelectedDate = new Date(todayParts[0], todayParts[1] - 1, todayParts[2]);
+        lastUserSelectedDate = new Date(currentSelectedDate);
 
         // Eventos do Navegador de Datas
         document.getElementById('btn-prev-date').addEventListener('click', () => navigateDate(-1));
         document.getElementById('btn-next-date').addEventListener('click', () => navigateDate(1));
         
+        // Clique na data para abrir picker nativo
+        document.getElementById('dash-date-click-area').addEventListener('click', () => {
+            if (currentScope === 'day') {
+                const picker = document.getElementById('native-date-picker');
+                picker.value = getSelectedDateString();
+                picker.showPicker();
+            } else if (currentScope === 'week') {
+                const picker = document.getElementById('native-week-picker');
+                // HTML week format: YYYY-Www
+                picker.showPicker();
+            } else if (currentScope === 'month') {
+                const picker = document.getElementById('native-month-picker');
+                // HTML month format: YYYY-MM
+                const yyyy = currentSelectedDate.getFullYear();
+                const mm = String(currentSelectedDate.getMonth() + 1).padStart(2, '0');
+                picker.value = `${yyyy}-${mm}`;
+                picker.showPicker();
+            }
+        });
+
+        // Listeners dos inputs nativos de data
+        document.getElementById('native-date-picker').addEventListener('change', (e) => {
+            if (e.target.value) {
+                const parts = e.target.value.split('-');
+                currentSelectedDate = new Date(parts[0], parts[1] - 1, parts[2]);
+                lastUserSelectedDate = new Date(currentSelectedDate);
+                updateDateDisplay();
+                loadDashboardData();
+            }
+        });
+
+        document.getElementById('native-week-picker').addEventListener('change', (e) => {
+            if (e.target.value) {
+                // Formato retornado: "2026-W32"
+                const parts = e.target.value.split('-W');
+                if (parts.length === 2) {
+                    const year = parseInt(parts[0], 10);
+                    const week = parseInt(parts[1], 10);
+                    // Criar data a partir do número da semana
+                    const simple = new Date(year, 0, 1 + (week - 1) * 7);
+                    const dow = simple.getDay();
+                    const ISOweekStart = simple;
+                    if (dow <= 4) {
+                        ISOweekStart.setDate(simple.getDate() - simple.getDay() + 1);
+                    } else {
+                        ISOweekStart.setDate(simple.getDate() + 8 - simple.getDay());
+                    }
+                    currentSelectedDate = ISOweekStart;
+                    updateDateDisplay();
+                    loadDashboardData();
+                }
+            }
+        });
+
+        document.getElementById('native-month-picker').addEventListener('change', (e) => {
+            if (e.target.value) {
+                // Formato retornado: "2026-08"
+                const parts = e.target.value.split('-');
+                if (parts.length === 2) {
+                    currentSelectedDate = new Date(parts[0], parts[1] - 1, 1);
+                    updateDateDisplay();
+                    loadDashboardData();
+                }
+            }
+        });
+
+        // Evento de adição de despesas
+        document.getElementById('btn-add-expense').addEventListener('click', () => {
+            const descInp = document.getElementById('dash-new-expense-desc');
+            const valInp = document.getElementById('dash-new-expense-val');
+            
+            const desc = descInp.value.trim();
+            const val = parseCurrency(valInp.value);
+
+            if (!desc) {
+                alert("Informe uma descrição para o gasto.");
+                return;
+            }
+            if (val <= 0) {
+                alert("Informe um valor maior que R$ 0,00.");
+                return;
+            }
+
+            currentExpensesList.push({ desc, val });
+            descInp.value = '';
+            valInp.value = '';
+            
+            renderExpensesList();
+            updateDashboardTargets();
+        });
+
         // Render Platform Inputs just once per settings
         const platContainer = document.getElementById('dash-platform-inputs');
         platContainer.innerHTML = '';
         appData.settings.plataformas.forEach(p => {
             const group = document.createElement('div');
             group.className = 'input-group';
+            group.style.marginBottom = '12px';
             group.innerHTML = `
                 <label>Ganho ${p} (R$)</label>
                 <input type="text" inputmode="numeric" class="plat-input live-calc currency-mask" data-plat="${p}" placeholder="0,00">
@@ -216,6 +383,10 @@ function initDashboard() {
                 const lancSection = document.getElementById('dash-lancamentos-section');
                 if (currentScope === 'day') {
                     lancSection.style.display = 'block';
+                    // Retorna para a última data selecionada pelo usuário no dia
+                    if (lastUserSelectedDate) {
+                        currentSelectedDate = new Date(lastUserSelectedDate);
+                    }
                 } else {
                     lancSection.style.display = 'none';
                 }
@@ -236,7 +407,8 @@ const diasSemana = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", 
 const mesesAno = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 
 function updateDateDisplay() {
-    const display = document.getElementById('dash-date-display');
+    const displayTop = document.getElementById('dash-date-display-top');
+    const displayMain = document.getElementById('dash-date-display');
     const todayStr = getTodayDateString();
     const selectedStr = getSelectedDateString();
     
@@ -247,12 +419,17 @@ function updateDateDisplay() {
         const nomeDia = diasSemana[currentSelectedDate.getDay()];
         
         if (todayStr === selectedStr) {
-            display.innerHTML = `&lt; Hoje - ${d}/${m}/${y} - ${nomeDia} &gt;`;
+            displayTop.style.display = 'block';
+            displayTop.textContent = "Hoje";
+            displayMain.innerHTML = `${d}/${m}/${y} - ${nomeDia}`;
         } else {
-            display.innerHTML = `&lt; ${d}/${m}/${y} - ${nomeDia} &gt;`;
+            displayTop.style.display = 'none';
+            displayMain.innerHTML = `${d}/${m}/${y} - ${nomeDia}`;
         }
     } 
     else if (currentScope === 'week') {
+        displayTop.style.display = 'none';
+        
         const day = currentSelectedDate.getDay(); 
         const diffToMonday = currentSelectedDate.getDate() - day + (day === 0 ? -6 : 1);
         const monday = new Date(currentSelectedDate);
@@ -269,18 +446,20 @@ function updateDateDisplay() {
         const sM = String(sunday.getMonth() + 1).padStart(2, '0');
         const sY = sunday.getFullYear();
         
-        display.innerHTML = `&lt; ${mD}/${mM}/${mY} - ${sD}/${sM}/${sY} &gt;`;
+        displayMain.innerHTML = `${mD}/${mM}/${mY} - ${sD}/${sM}/${sY}`;
     }
     else if (currentScope === 'month') {
+        displayTop.style.display = 'none';
         const nomeMes = mesesAno[currentSelectedDate.getMonth()];
         const y = currentSelectedDate.getFullYear();
-        display.innerHTML = `&lt; ${nomeMes} ${y} &gt;`;
+        displayMain.innerHTML = `${nomeMes} ${y}`;
     }
 }
 
 function navigateDate(direction) {
     if (currentScope === 'day') {
         currentSelectedDate.setDate(currentSelectedDate.getDate() + direction);
+        lastUserSelectedDate = new Date(currentSelectedDate);
     } else if (currentScope === 'week') {
         currentSelectedDate.setDate(currentSelectedDate.getDate() + (direction * 7));
     } else if (currentScope === 'month') {
@@ -289,6 +468,41 @@ function navigateDate(direction) {
     updateDateDisplay();
     loadDashboardData();
 }
+
+function renderExpensesList() {
+    const listDiv = document.getElementById('dash-expenses-list');
+    listDiv.innerHTML = '';
+    
+    if (currentExpensesList.length === 0) {
+        listDiv.innerHTML = `<span style="font-size:0.8rem; color:var(--text-secondary); font-style:italic;">Nenhum gasto adicionado hoje.</span>`;
+        return;
+    }
+
+    currentExpensesList.forEach((exp, idx) => {
+        const item = document.createElement('div');
+        item.className = 'd-flex justify-between align-center';
+        item.style.background = 'rgba(255, 255, 255, 0.03)';
+        item.style.padding = '6px 10px';
+        item.style.borderRadius = '6px';
+        item.style.fontSize = '0.85rem';
+        
+        item.innerHTML = `
+            <span>${exp.desc}</span>
+            <div class="d-flex align-center" style="gap:8px;">
+                <span style="font-weight:600; color:var(--accent-danger)">R$ ${exp.val.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
+                <span style="color:var(--accent-danger); font-weight:bold; cursor:pointer;" onclick="window.removeExpenseItem(${idx})">x</span>
+            </div>
+        `;
+        listDiv.appendChild(item);
+    });
+}
+
+// Expõe globalmente para o botão delete dinâmico funcionar
+window.removeExpenseItem = (idx) => {
+    currentExpensesList.splice(idx, 1);
+    renderExpensesList();
+    updateDashboardTargets();
+};
 
 function loadDashboardData() {
     const selectedDate = getSelectedDateString();
@@ -312,19 +526,25 @@ function loadDashboardData() {
         document.getElementById('dash-preco-litro').value = '';
     }
     
-    if (dayStats.expenses) {
-        document.getElementById('dash-expenses').value = dayStats.expenses.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+    // Suportar leitura da nova estrutura de gastos do histórico
+    const savedDayData = appData.history.find(h => h.date === selectedDate);
+    if (savedDayData && Array.isArray(savedDayData.detailedExpenses)) {
+        currentExpensesList = [...savedDayData.detailedExpenses];
+    } else if (dayStats.expenses > 0) {
+        // Fallback legado se houver valor acumulado mas sem detalhes
+        currentExpensesList = [{ desc: 'Gastos gerais', val: dayStats.expenses }];
     } else {
-        document.getElementById('dash-expenses').value = '';
+        currentExpensesList = [];
     }
-    
+
+    renderExpensesList();
     updateDashboardTargets();
 }
 
 function updateDashboardTargets() {
     const selectedDate = getSelectedDateString();
     
-    const currentDayInputs = { earnings: {}, km: 0, consumoL: 0, precoL: 0, expenses: 0 };
+    const currentDayInputs = { earnings: {}, km: 0, consumoL: 0, precoL: 0, expenses: 0, detailedExpenses: [] };
     let currentTotalEarned = 0;
     
     document.querySelectorAll('.plat-input').forEach(inp => {
@@ -341,7 +561,10 @@ function updateDashboardTargets() {
     const pL = parseCurrency(document.getElementById('dash-preco-litro').value);
     currentDayInputs.precoL = pL > 0 ? pL : appData.settings.mediaPrecoCombustivel;
     
-    currentDayInputs.expenses = parseCurrency(document.getElementById('dash-expenses').value);
+    // Calcula o somatório dos múltiplos gastos
+    const totalExpenses = currentExpensesList.reduce((acc, item) => acc + item.val, 0);
+    currentDayInputs.expenses = totalExpenses;
+    currentDayInputs.detailedExpenses = currentExpensesList;
     
     const stats = calculateTargets(currentScope, appData.settings, appData.history, selectedDate, currentDayInputs);
     
@@ -366,6 +589,7 @@ function updateDashboardTargets() {
     elBruto.textContent = `R$ ${bruto.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
     elLiquido.textContent = `R$ ${liquido.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
     elLiquido.style.color = liquido >= 0 ? 'var(--accent-secondary)' : 'var(--accent-danger)';
+
     if (stats.metaAlcancada) {
         dashFalta.textContent = `+ R$ ${stats.excedente.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
         dashFalta.className = 'metric-large';
@@ -416,7 +640,7 @@ document.getElementById('btn-save-day').addEventListener('click', async () => {
     let dayData = appData.history.find(h => h.date === selectedDate);
     
     if (!dayData) {
-        dayData = { date: selectedDate, earnings: {}, km: 0, consumoL: 0, precoL: 0, expenses: 0 };
+        dayData = { date: selectedDate, earnings: {}, km: 0, consumoL: 0, precoL: 0, expenses: 0, detailedExpenses: [] };
         appData.history.push(dayData);
     }
 
@@ -436,7 +660,9 @@ document.getElementById('btn-save-day').addEventListener('click', async () => {
     if (precoDia > 0) dayData.precoL = precoDia;
     else delete dayData.precoL;
     
-    dayData.expenses = parseCurrency(document.getElementById('dash-expenses').value) || 0;
+    // Salva o total calculado de gastos e a lista detalhada
+    dayData.expenses = currentExpensesList.reduce((acc, item) => acc + item.val, 0);
+    dayData.detailedExpenses = [...currentExpensesList];
 
     document.getElementById('btn-save-day').textContent = "Salvando...";
     try {
