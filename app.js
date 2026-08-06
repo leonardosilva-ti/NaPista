@@ -30,7 +30,7 @@ function getSelectedDateString() {
     return `${yyyy}-${mm}-${dd}`;
 }
 
-// Helpers de Conversão de Moeda (Máscara)
+// Helpers de Conversão de Moedas (Máscara)
 function parseCurrency(val) {
     if (!val) return 0;
     if (typeof val === 'number') return val;
