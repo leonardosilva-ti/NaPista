@@ -62,12 +62,34 @@
                 <hr style="border-color: var(--border-color); margin: 20px 0;">
                 
                 <h3>Aplicativos Usados</h3>
-                <div id="setup-platforms-list" class="grid grid-2 mb-4">
-                    <!-- Gerado via JS -->
+                <div style="margin-bottom: 12px;">
+                    <button id="btn-select-apps-modal" type="button" class="btn btn-secondary" style="font-size: 0.95rem; padding: 10px 14px;">Selecionar aplicativos/empresas</button>
                 </div>
-                <div class="d-flex" style="gap: 10px;">
-                    <input type="text" id="setup-new-platform" placeholder="Outro app">
-                    <button id="btn-add-platform" class="btn btn-secondary" style="width: auto; padding: 14px;">+</button>
+                
+                <!-- Lista de Apps Atualmente Selecionados -->
+                <div id="setup-platforms-list" class="d-flex" style="flex-wrap: wrap; gap: 8px; margin-bottom: 16px;">
+                    <!-- Tags de apps ativos -->
+                </div>
+
+                <!-- Modal de Seleção de Apps -->
+                <div id="apps-selection-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.9); z-index:1000; align-items:center; justify-content:center; padding: 20px;">
+                    <div class="card" style="width:100%; max-width:400px; background:var(--bg-color); border:1px solid var(--accent-primary); box-shadow: var(--glow-primary);">
+                        <h3 class="text-center" style="margin-bottom:16px;">Selecionar Apps/Empresas</h3>
+                        <div id="modal-apps-list" style="display:flex; flex-direction:column; gap:10px; max-height:250px; overflow-y:auto; margin-bottom:16px; padding-right:6px;">
+                            <!-- Checkboxes de Uber, 99 Drive, InDrive, Particular, Shoppe, Mercado Livre -->
+                        </div>
+                        
+                        <!-- Opção "Outros" -->
+                        <div style="border-top: 1px solid var(--border-color); padding-top: 12px; margin-bottom: 16px;">
+                            <label style="font-size: 0.85rem; color: var(--text-secondary); display:block; margin-bottom:6px;">Adicionar outro aplicativo:</label>
+                            <div class="d-flex" style="gap:8px;">
+                                <input type="text" id="modal-other-app-name" placeholder="Ex: Loggi" style="padding:10px; font-size:0.9rem;">
+                                <button id="btn-modal-add-other" type="button" class="btn btn-primary" style="width:auto; padding:0 16px; font-size:0.9rem;">+</button>
+                            </div>
+                        </div>
+                        
+                        <button id="btn-close-apps-modal" type="button" class="btn btn-primary" style="padding:12px; font-size:1rem;">Confirmar Seleção</button>
+                    </div>
                 </div>
                 
                 <button id="btn-finish-setup" class="btn btn-primary mt-4">Concluir e Salvar</button>
@@ -90,11 +112,22 @@
                 <div class="tab-btn dash-tab-btn" data-scope="month" style="padding: 8px;">Do mês</div>
             </div>
 
-            <!-- Navegador de datas centralizado -->
+            <!-- Navegador de datas centralizado com suporte a clique e inputs nativos -->
             <div class="d-flex justify-center mb-4">
-                <div class="date-navigator d-flex align-center justify-between" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 6px 10px; width: 100%;">
+                <div class="date-navigator d-flex align-center justify-between" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 6px 10px; width: 100%; position: relative;">
                     <button id="btn-prev-date" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer; padding:0 12px;">&lt;</button>
-                    <div id="dash-date-display" style="font-weight:bold; font-size:0.9rem; text-align:center; flex:1;">&lt; Hoje &gt;</div>
+                    
+                    <!-- Container clicável para abrir o date picker correspondente -->
+                    <div id="dash-date-click-area" style="cursor:pointer; flex:1; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height: 40px;">
+                        <div id="dash-date-display-top" style="font-weight:bold; font-size:0.95rem; color: var(--accent-secondary); display:none;">Hoje</div>
+                        <div id="dash-date-display" style="font-size:0.85rem; font-weight: 500;">Carregando...</div>
+                    </div>
+                    
+                    <!-- Date Pickers Invisíveis acionados por JS -->
+                    <input type="date" id="native-date-picker" style="position:absolute; opacity:0; pointer-events:none; left:50%; top:50%; width:1px; height:1px;">
+                    <input type="week" id="native-week-picker" style="position:absolute; opacity:0; pointer-events:none; left:50%; top:50%; width:1px; height:1px;">
+                    <input type="month" id="native-month-picker" style="position:absolute; opacity:0; pointer-events:none; left:50%; top:50%; width:1px; height:1px;">
+                    
                     <button id="btn-next-date" style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer; padding:0 12px;">&gt;</button>
                 </div>
             </div>
@@ -146,9 +179,18 @@
                             <label>Preço Litro (R$)</label>
                             <input type="text" inputmode="numeric" id="dash-preco-litro" class="currency-mask" placeholder="Ex: 5,50">
                         </div>
-                        <div class="input-group">
-                            <label>Gastos (Almoço, etc)</label>
-                            <input type="text" inputmode="numeric" id="dash-expenses" class="currency-mask" placeholder="0,00">
+                        <div class="input-group" style="grid-column: span 2;">
+                            <label>Gastos (Alimentação, Outros)</label>
+                            <div id="dash-expenses-container" style="background: rgba(15, 23, 42, 0.4); padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 10px;">
+                                <div id="dash-expenses-list" style="display:flex; flex-direction:column; gap:6px; max-height:120px; overflow-y:auto; margin-bottom:10px;">
+                                    <!-- Lista dinâmica de gastos -->
+                                </div>
+                                <div class="d-flex" style="gap:8px;">
+                                    <input type="text" id="dash-new-expense-desc" placeholder="Desc. ex: Almoço" style="flex:2; padding:8px 12px; font-size:0.9rem;">
+                                    <input type="text" inputmode="numeric" id="dash-new-expense-val" class="currency-mask" placeholder="R$ 0,00" style="flex:1; padding:8px 12px; font-size:0.9rem;">
+                                    <button id="btn-add-expense" type="button" class="btn btn-secondary" style="width:auto; padding:0 14px; font-size:0.9rem; border-radius:10px;">+ Adicionar</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <button id="btn-save-day" class="btn btn-primary">Salvar Lançamentos</button>
