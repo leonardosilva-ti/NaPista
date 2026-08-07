@@ -13,6 +13,10 @@ let lastUserSelectedDate = null;
 // Lista de Despesas (descrição e valor) temporárias do dia selecionado
 let currentExpensesList = [];
 
+// Variáveis de controle de Relatórios
+let currentReportTab = 'tab-day';
+let currentReportExpenses = []; // Detalhe de gastos do período selecionado em relatório
+
 // Lista global de plataformas pré-cadastradas para seleção
 const PRESETS_PLATFORMS = ["Uber", "99 Drive (antigo 99)", "InDrive", "Particular", "Shoppe", "Mercado Livre"];
 
@@ -76,7 +80,7 @@ function showScreen(screenId) {
     document.getElementById(screenId).classList.add('active');
     
     if (screenId === 'dashboard-screen') initDashboard();
-    if (screenId === 'reports-screen') renderReports('tab-day');
+    if (screenId === 'reports-screen') initReports();
 }
 
 // Init
@@ -103,7 +107,6 @@ async function onAuthenticated() {
             }
         } else {
             appData = JSON.parse(JSON.stringify(defaultData));
-            // No primeiro acesso, garantir que a lista venha vazia para o usuário escolher
             appData.settings.plataformas = [];
             renderSetup();
             showScreen('setup-screen');
@@ -367,7 +370,6 @@ function initDashboard() {
                 btn.classList.add('active');
                 currentScope = btn.dataset.scope;
                 
-                // Hide/Show Lançamentos e o botão de adicionar despesa (só adiciona no dia atual do lançamento)
                 const lancSection = document.getElementById('dash-lancamentos-section');
                 const btnAddExpense = document.getElementById('btn-open-expense-modal');
                 if (currentScope === 'day') {
@@ -378,7 +380,7 @@ function initDashboard() {
                     }
                 } else {
                     lancSection.style.display = 'none';
-                    btnAddExpense.style.display = 'none'; // Oculta botão de novo gasto em resumos semanais/mensais
+                    btnAddExpense.style.display = 'none';
                 }
                 
                 updateDateDisplay();
@@ -476,6 +478,11 @@ function openExpenseModal(idx = null) {
     modal.style.display = "flex";
 }
 
+// Fechamento modal setup
+window.closeExpenseModal = () => {
+    closeExpenseModal();
+};
+
 function closeExpenseModal() {
     const modal = document.getElementById('expense-popup-modal');
     modal.style.display = "none";
@@ -511,13 +518,11 @@ function renderExpensesList() {
     const listDiv = document.getElementById('dash-expenses-list');
     listDiv.innerHTML = '';
     
-    // Obter lista a ser exibida com base no escopo
     let listToDisplay = [];
     
     if (currentScope === 'day') {
         listToDisplay = currentExpensesList.map((item, idx) => ({ ...item, date: getSelectedDateString(), originalIdx: idx }));
     } else {
-        // Filtrar e agrupar gastos do histórico para semana/mês
         const targetDateObj = new Date(getSelectedDateString() + 'T12:00:00');
         const currentMonth = targetDateObj.getMonth();
         const currentYear = targetDateObj.getFullYear();
@@ -535,8 +540,6 @@ function renderExpensesList() {
             filteredHistory = appData.history.filter(item => item.date >= mStr && item.date <= sStr);
         }
 
-        // Adicionar também o input temporário de hoje caso coincida com o período visualizado e não esteja salvo
-        const selectedDateStr = getSelectedDateString();
         filteredHistory.forEach(day => {
             if (Array.isArray(day.detailedExpenses)) {
                 day.detailedExpenses.forEach(exp => {
@@ -583,7 +586,6 @@ function renderExpensesList() {
     });
 }
 
-// Funções expostas no escopo global para acionamento via onclick dos botões da lista
 window.removeExpenseItem = (idx) => {
     currentExpensesList.splice(idx, 1);
     renderExpensesList();
@@ -616,7 +618,6 @@ function loadDashboardData() {
         document.getElementById('dash-preco-litro').value = '';
     }
     
-    // Suportar leitura da nova estrutura de gastos do histórico
     const savedDayData = appData.history.find(h => h.date === selectedDate);
     if (savedDayData && Array.isArray(savedDayData.detailedExpenses)) {
         currentExpensesList = [...savedDayData.detailedExpenses];
@@ -650,7 +651,6 @@ function updateDashboardTargets() {
     const pL = parseCurrency(document.getElementById('dash-preco-litro').value);
     currentDayInputs.precoL = pL > 0 ? pL : appData.settings.mediaPrecoCombustivel;
     
-    // Calcula o somatório dos múltiplos gastos
     const totalExpenses = currentExpensesList.reduce((acc, item) => acc + item.val, 0);
     currentDayInputs.expenses = totalExpenses;
     currentDayInputs.detailedExpenses = currentExpensesList;
@@ -764,48 +764,416 @@ document.getElementById('btn-save-day').addEventListener('click', async () => {
 });
 
 // --- REPORTS SCREEN ---
-document.querySelectorAll('.tab-btn').forEach(btn => {
-    if(!btn.classList.contains('dash-tab-btn')){
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.tab-btn:not(.dash-tab-btn)').forEach(b => b.classList.remove('active'));
+function initReports() {
+    // Configurar listeners de tabs dos relatórios
+    document.querySelectorAll('.report-tab-btn').forEach(btn => {
+        btn.onclick = () => {
+            document.querySelectorAll('.report-tab-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            renderReports(btn.dataset.tab);
+            currentReportTab = btn.dataset.tab;
+            
+            const customPeriodSection = document.getElementById('report-custom-period');
+            if (currentReportTab === 'tab-other') {
+                customPeriodSection.style.display = 'block';
+            } else {
+                customPeriodSection.style.display = 'none';
+            }
+            
+            renderReports(currentReportTab);
+        };
+    });
+
+    document.getElementById('btn-apply-custom-period').onclick = () => {
+        renderReports('tab-other');
+    };
+
+    document.getElementById('rep-stat-gastos-btn').onclick = () => {
+        openReportExpensesModal();
+    };
+
+    document.getElementById('btn-close-report-expenses-modal').onclick = () => {
+        document.getElementById('report-expenses-modal').style.display = 'none';
+    };
+
+    renderReports(currentReportTab);
+}
+
+function openReportExpensesModal() {
+    const modal = document.getElementById('report-expenses-modal');
+    const container = document.getElementById('report-expenses-modal-list');
+    container.innerHTML = '';
+
+    if (currentReportExpenses.length === 0) {
+        container.innerHTML = '<p class="text-center" style="font-size:0.9rem; color:var(--text-secondary);">Nenhum gasto extra neste período.</p>';
+    } else {
+        currentReportExpenses.forEach(exp => {
+            const div = document.createElement('div');
+            div.className = 'd-flex justify-between align-center';
+            div.style.background = 'rgba(255,255,255,0.03)';
+            div.style.padding = '8px 12px';
+            div.style.borderRadius = '6px';
+            div.style.fontSize = '0.9rem';
+            div.innerHTML = `
+                <span>${exp.desc} <small style="color:var(--text-secondary)">(${exp.date})</small></span>
+                <span style="font-weight:600; color:var(--accent-danger)">R$ ${exp.val.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
+            `;
+            container.appendChild(div);
         });
     }
-});
+
+    modal.style.display = 'flex';
+}
 
 function renderReports(tabId) {
+    const listTitle = document.getElementById('report-list-title');
     const content = document.getElementById('report-content');
-    let html = '';
     
-    const history = [...appData.history].sort((a,b) => new Date(b.date) - new Date(a.date));
+    // Obter plataformas ativas do perfil do usuário para o gráfico
+    const platforms = appData.settings.plataformas || [];
     
-    if (history.length === 0) {
-        content.innerHTML = '<p class="text-center">Nenhum dado registrado ainda.</p>';
+    // Resetar Estatísticas do período
+    document.getElementById('rep-stat-km').textContent = '0.0 km';
+    document.getElementById('rep-stat-consumo').textContent = '0.0 km/L';
+    document.getElementById('rep-stat-combustivel').textContent = 'R$ 0,00';
+    document.getElementById('rep-stat-custo-km').textContent = 'R$ 0,00';
+    document.getElementById('rep-stat-gastos').textContent = 'R$ 0,00 ➔';
+    
+    currentReportExpenses = [];
+
+    // Por padrão o gráfico vem zerado (valores zerados por plataforma)
+    drawReportChart(platforms, {});
+
+    if (!appData.history || appData.history.length === 0) {
+        content.innerHTML = '<p class="text-center" style="padding:20px 0;">Nenhum dado registrado ainda.</p>';
+        listTitle.textContent = "Nenhum dado";
         return;
     }
 
+    let itemsToRender = []; // Dias, semanas ou meses para a lista do período
+
     if (tabId === 'tab-day') {
-        history.slice(0, 7).forEach(h => {
-            let total = 0;
-            for(let k in h.earnings) total += (parseFloat(h.earnings[k])||0);
+        listTitle.textContent = "Lançamentos de Dias Recentes";
+        itemsToRender = [...appData.history].sort((a,b) => new Date(b.date) - new Date(a.date));
+        
+        let html = '';
+        itemsToRender.forEach(h => {
+            let bruto = 0;
+            for(let k in h.earnings) bruto += (parseFloat(h.earnings[k])||0);
+            
+            // Calcular líquido
+            const km = parseFloat(h.km) || 0;
+            const consumo = parseFloat(h.consumoL) || appData.settings.mediaConsumoL;
+            const precoL = parseFloat(h.precoL) || appData.settings.mediaPrecoCombustivel;
+            const custoComb = (km / consumo) * precoL;
+            const gastosExtras = parseFloat(h.expenses) || 0;
+            const liquido = bruto - custoComb - gastosExtras;
+
+            // Formatação do dia
+            const parts = h.date.split('-');
+            const formattedDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
+
             html += `
-                <div style="border-bottom: 1px solid var(--border-color); padding: 10px 0;">
+                <div class="report-item-row" data-date="${h.date}" style="border-bottom: 1px solid var(--border-color); padding: 12px 6px; cursor:pointer; transition:background 0.2s;">
                     <div class="d-flex justify-between">
-                        <strong>${h.date}</strong>
-                        <span style="color:var(--accent-secondary)">R$ ${total.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
-                    </div>
-                    <div style="font-size: 0.8rem; color: var(--text-secondary);">
-                        KM: ${h.km} | PreçoL: ${h.precoL ? 'R$'+h.precoL.toLocaleString('pt-BR') : 'Média'} | Gastos: R$ ${h.expenses ? h.expenses.toLocaleString('pt-BR') : '0'}
+                        <strong>${formattedDate}</strong>
+                        <div>
+                            <span style="color:var(--text-primary); font-weight:bold; margin-right:12px;">Bruto: R$ ${bruto.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
+                            <span style="color:var(--accent-secondary); font-weight:bold;">Líq: R$ ${liquido.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
+                        </div>
                     </div>
                 </div>
             `;
         });
-    } else {
-        html = '<p class="text-center">Aguardando implementação avançada de gráficos.</p>';
+        content.innerHTML = html;
+
+        // Ao clicar no item, preenche as estatísticas e gráfico
+        document.querySelectorAll('.report-item-row').forEach(row => {
+            row.onclick = () => {
+                document.querySelectorAll('.report-item-row').forEach(r => r.style.background = 'none');
+                row.style.background = 'rgba(59, 130, 246, 0.15)';
+                const dateStr = row.dataset.date;
+                const found = appData.history.find(h => h.date === dateStr);
+                if (found) {
+                    processPeriodData([found]);
+                }
+            };
+        });
+
+    } 
+    else if (tabId === 'tab-week') {
+        listTitle.textContent = "Lançamentos de Semanas";
+        // Agrupar histórico por semanas
+        const weeksMap = {};
+        appData.history.forEach(h => {
+            const dateObj = new Date(h.date + 'T12:00:00');
+            const { monday, sunday } = getWeekStartEndDates(dateObj);
+            const key = `${monday.toISOString().split('T')[0]}_${sunday.toISOString().split('T')[0]}`;
+            if (!weeksMap[key]) weeksMap[key] = [];
+            weeksMap[key].push(h);
+        });
+
+        const sortedWeekKeys = Object.keys(weeksMap).sort((a,b) => new Date(b.split('_')[0]) - new Date(a.split('_')[0]));
+        
+        let html = '';
+        sortedWeekKeys.forEach(key => {
+            const days = weeksMap[key];
+            let bruto = 0;
+            let liquido = 0;
+            
+            days.forEach(h => {
+                let dayBruto = 0;
+                for(let k in h.earnings) dayBruto += (parseFloat(h.earnings[k])||0);
+                bruto += dayBruto;
+
+                const km = parseFloat(h.km) || 0;
+                const consumo = parseFloat(h.consumoL) || appData.settings.mediaConsumoL;
+                const precoL = parseFloat(h.precoL) || appData.settings.mediaPrecoCombustivel;
+                const custoComb = (km / consumo) * precoL;
+                const gastosExtras = parseFloat(h.expenses) || 0;
+                liquido += (dayBruto - custoComb - gastosExtras);
+            });
+
+            const partsStart = key.split('_')[0].split('-');
+            const partsEnd = key.split('_')[1].split('-');
+            const formattedRange = `${partsStart[2]}/${partsStart[1]} a ${partsEnd[2]}/${partsEnd[1]}`;
+
+            html += `
+                <div class="report-item-row" data-week-key="${key}" style="border-bottom: 1px solid var(--border-color); padding: 12px 6px; cursor:pointer; transition:background 0.2s;">
+                    <div class="d-flex justify-between">
+                        <strong>Semana ${formattedRange}</strong>
+                        <div>
+                            <span style="color:var(--text-primary); font-weight:bold; margin-right:12px;">Bruto: R$ ${bruto.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
+                            <span style="color:var(--accent-secondary); font-weight:bold;">Líq: R$ ${liquido.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        content.innerHTML = html;
+
+        document.querySelectorAll('.report-item-row').forEach(row => {
+            row.onclick = () => {
+                document.querySelectorAll('.report-item-row').forEach(r => r.style.background = 'none');
+                row.style.background = 'rgba(59, 130, 246, 0.15)';
+                const key = row.dataset.weekKey;
+                const days = weeksMap[key];
+                if (days) {
+                    processPeriodData(days);
+                }
+            };
+        });
+    } 
+    else if (tabId === 'tab-month') {
+        listTitle.textContent = "Lançamentos de Meses";
+        // Agrupar histórico por meses
+        const monthsMap = {};
+        appData.history.forEach(h => {
+            const parts = h.date.split('-');
+            const key = `${parts[0]}-${parts[1]}`; // YYYY-MM
+            if (!monthsMap[key]) monthsMap[key] = [];
+            monthsMap[key].push(h);
+        });
+
+        const sortedMonthKeys = Object.keys(monthsMap).sort((a,b) => new Date(b + '-01') - new Date(a + '-01'));
+
+        let html = '';
+        sortedMonthKeys.forEach(key => {
+            const days = monthsMap[key];
+            let bruto = 0;
+            let liquido = 0;
+            
+            days.forEach(h => {
+                let dayBruto = 0;
+                for(let k in h.earnings) dayBruto += (parseFloat(h.earnings[k])||0);
+                bruto += dayBruto;
+
+                const km = parseFloat(h.km) || 0;
+                const consumo = parseFloat(h.consumoL) || appData.settings.mediaConsumoL;
+                const precoL = parseFloat(h.precoL) || appData.settings.mediaPrecoCombustivel;
+                const custoComb = (km / consumo) * precoL;
+                const gastosExtras = parseFloat(h.expenses) || 0;
+                liquido += (dayBruto - custoComb - gastosExtras);
+            });
+
+            const parts = key.split('-');
+            const nameMonth = mesesAno[parseInt(parts[1], 10) - 1];
+
+            html += `
+                <div class="report-item-row" data-month-key="${key}" style="border-bottom: 1px solid var(--border-color); padding: 12px 6px; cursor:pointer; transition:background 0.2s;">
+                    <div class="d-flex justify-between">
+                        <strong>${nameMonth} / ${parts[0]}</strong>
+                        <div>
+                            <span style="color:var(--text-primary); font-weight:bold; margin-right:12px;">Bruto: R$ ${bruto.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
+                            <span style="color:var(--accent-secondary); font-weight:bold;">Líq: R$ ${liquido.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        content.innerHTML = html;
+
+        document.querySelectorAll('.report-item-row').forEach(row => {
+            row.onclick = () => {
+                document.querySelectorAll('.report-item-row').forEach(r => r.style.background = 'none');
+                row.style.background = 'rgba(59, 130, 246, 0.15)';
+                const key = row.dataset.monthKey;
+                const days = monthsMap[key];
+                if (days) {
+                    processPeriodData(days);
+                }
+            };
+        });
+    } 
+    else if (tabId === 'tab-other') {
+        listTitle.textContent = "Filtrar período customizado";
+        content.innerHTML = '<p class="text-center" style="padding:20px 0;">Preencha a data início e fim acima e clique em Filtrar Período.</p>';
+        
+        const startVal = document.getElementById('report-start-date').value;
+        const endVal = document.getElementById('report-end-date').value;
+
+        if (startVal && endVal) {
+            const filteredDays = appData.history.filter(h => h.date >= startVal && h.date <= endVal);
+            if (filteredDays.length === 0) {
+                content.innerHTML = '<p class="text-center" style="padding:20px 0;">Nenhum dado encontrado no intervalo selecionado.</p>';
+                return;
+            }
+
+            listTitle.textContent = `Lançamentos de ${startVal.split('-')[2]}/${startVal.split('-')[1]} até ${endVal.split('-')[2]}/${endVal.split('-')[1]}`;
+            
+            // Processa de imediato os dados do período customizado filtrado
+            processPeriodData(filteredDays);
+
+            let html = '';
+            filteredDays.sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(h => {
+                let bruto = 0;
+                for(let k in h.earnings) bruto += (parseFloat(h.earnings[k])||0);
+                
+                const km = parseFloat(h.km) || 0;
+                const consumo = parseFloat(h.consumoL) || appData.settings.mediaConsumoL;
+                const precoL = parseFloat(h.precoL) || appData.settings.mediaPrecoCombustivel;
+                const custoComb = (km / consumo) * precoL;
+                const gastosExtras = parseFloat(h.expenses) || 0;
+                const liquido = bruto - custoComb - gastosExtras;
+
+                const parts = h.date.split('-');
+                const formattedDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
+
+                html += `
+                    <div style="border-bottom: 1px solid var(--border-color); padding: 12px 6px;">
+                        <div class="d-flex justify-between">
+                            <strong>${formattedDate}</strong>
+                            <div>
+                                <span style="color:var(--text-primary); font-weight:bold; margin-right:12px;">Bruto: R$ ${bruto.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
+                                <span style="color:var(--accent-secondary); font-weight:bold;">Líq: R$ ${liquido.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            content.innerHTML = html;
+        }
     }
+}
+
+// Processa as estatísticas e os valores por app de um conjunto de dias selecionado
+function processPeriodData(daysList) {
+    const platforms = appData.settings.plataformas || [];
+    const appTotals = {};
+    platforms.forEach(p => appTotals[p] = 0);
+
+    let totalKm = 0;
+    let sumConsumo = 0;
+    let sumPrecoL = 0;
+    let countConsumo = 0;
+    let countPrecoL = 0;
+    let totalGastosExtras = 0;
     
-    content.innerHTML = html;
+    currentReportExpenses = [];
+
+    daysList.forEach(day => {
+        // Ganhos
+        for (let p in day.earnings) {
+            if (appTotals[p] !== undefined) {
+                appTotals[p] += parseFloat(day.earnings[p]) || 0;
+            }
+        }
+
+        // Km Rodado
+        totalKm += parseFloat(day.km) || 0;
+
+        // Consumo Automóvel
+        if (day.consumoL) {
+            sumConsumo += parseFloat(day.consumoL);
+            countConsumo++;
+        }
+        
+        // Preço Combustível
+        if (day.precoL) {
+            sumPrecoL += parseFloat(day.precoL);
+            countPrecoL++;
+        }
+
+        // Gastos Extras
+        const dayExpenseVal = parseFloat(day.expenses) || 0;
+        totalGastosExtras += dayExpenseVal;
+
+        if (Array.isArray(day.detailedExpenses)) {
+            day.detailedExpenses.forEach(exp => {
+                currentReportExpenses.push({ desc: exp.desc, val: exp.val, date: day.date.split('-')[2] + '/' + day.date.split('-')[1] });
+            });
+        } else if (dayExpenseVal > 0) {
+            currentReportExpenses.push({ desc: 'Gastos Gerais', val: dayExpenseVal, date: day.date.split('-')[2] + '/' + day.date.split('-')[1] });
+        }
+    });
+
+    const mediaConsumo = countConsumo > 0 ? (sumConsumo / countConsumo) : appData.settings.mediaConsumoL;
+    const mediaPrecoL = countPrecoL > 0 ? (sumPrecoL / countPrecoL) : appData.settings.mediaPrecoCombustivel;
+    const custoCombustivelPorKm = mediaPrecoL / mediaConsumo;
+
+    // Atualizar UI das Estatísticas
+    document.getElementById('rep-stat-km').textContent = `${totalKm.toFixed(1)} km`;
+    document.getElementById('rep-stat-consumo').textContent = `${mediaConsumo.toFixed(1)} km/L`;
+    document.getElementById('rep-stat-combustivel').textContent = `R$ ${mediaPrecoL.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
+    document.getElementById('rep-stat-custo-km').textContent = `R$ ${custoCombustivelPorKm.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
+    document.getElementById('rep-stat-gastos').textContent = `R$ ${totalGastosExtras.toLocaleString('pt-BR', {minimumFractionDigits:2})} ➔`;
+
+    // Desenhar Gráfico
+    drawReportChart(platforms, appTotals);
+}
+
+// Desenha o gráfico de barras
+function drawReportChart(platforms, appTotals) {
+    const container = document.getElementById('report-chart-container');
+    container.innerHTML = '';
+
+    // Encontrar maior valor para normalizar altura das torres (máximo 100%)
+    let maxVal = 0;
+    platforms.forEach(p => {
+        const val = appTotals[p] || 0;
+        if (val > maxVal) maxVal = val;
+    });
+
+    if (maxVal === 0) maxVal = 100; // Evita divisão por zero
+
+    platforms.forEach(p => {
+        const val = appTotals[p] || 0;
+        const pctHeight = (val / maxVal) * 100;
+
+        const colDiv = document.createElement('div');
+        colDiv.style.display = 'flex';
+        colDiv.style.flexDirection = 'column';
+        colDiv.style.alignItems = 'center';
+        colDiv.style.width = '14%';
+        colDiv.style.height = '100%';
+        colDiv.style.justifyContent = 'flex-end';
+
+        colDiv.innerHTML = `
+            <span style="font-size:0.75rem; font-weight:bold; color:var(--accent-secondary); margin-bottom:4px; white-space:nowrap;">R$ ${val.toFixed(0)}</span>
+            <div style="width:70%; height:${pctHeight.toFixed(0)}%; background:linear-gradient(180deg, var(--accent-primary) 0%, rgba(59,130,246,0.3) 100%); border-radius:6px 6px 0 0; transition:height 0.4s ease; box-shadow: var(--glow-primary);"></div>
+            <span style="font-size:0.7rem; color:var(--text-secondary); margin-top:8px; text-align:center; overflow:hidden; text-overflow:ellipsis; width:100%; white-space:nowrap;" title="${p}">${p.split(' ')[0]}</span>
+        `;
+        container.appendChild(colDiv);
+    });
 }
 
 // --- PROFILE SCREEN ---
