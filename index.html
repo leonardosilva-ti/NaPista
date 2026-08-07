@@ -229,16 +229,81 @@
                 <h2>Relatórios</h2>
             </div>
             
-            <div class="tabs">
-                <div class="tab-btn active" data-tab="tab-day">Dia</div>
-                <div class="tab-btn" data-tab="tab-week">Semana</div>
-                <div class="tab-btn" data-tab="tab-month">Mês</div>
+            <div class="tabs" style="margin-bottom:12px;">
+                <div class="tab-btn active report-tab-btn" data-tab="tab-day">Dia</div>
+                <div class="tab-btn report-tab-btn" data-tab="tab-week">Semana</div>
+                <div class="tab-btn report-tab-btn" data-tab="tab-month">Mês</div>
+                <div class="tab-btn report-tab-btn" data-tab="tab-other">Outro</div>
             </div>
 
-            <div class="card" id="report-content">
-                <!-- Gerado via JS -->
+            <!-- Seleção de Período Customizado (Exibido apenas na aba Outro) -->
+            <div id="report-custom-period" class="card mb-4" style="display:none; padding:14px;">
+                <div class="grid grid-2" style="margin-bottom:10px;">
+                    <div class="input-group" style="margin-bottom:0;">
+                        <label style="font-size:0.8rem;">Data Início</label>
+                        <input type="date" id="report-start-date" style="padding:8px 10px; font-size:0.9rem;">
+                    </div>
+                    <div class="input-group" style="margin-bottom:0;">
+                        <label style="font-size:0.8rem;">Data Fim</label>
+                        <input type="date" id="report-end-date" style="padding:8px 10px; font-size:0.9rem;">
+                    </div>
+                </div>
+                <button id="btn-apply-custom-period" class="btn btn-primary" style="padding:10px; font-size:0.9rem;">Filtrar Período</button>
+            </div>
+
+            <!-- Gráfico de Torre/Barras de Ganhos por App -->
+            <div class="card mb-4" style="padding: 16px;">
+                <h3 style="font-size:1.1rem; margin-bottom:12px; text-align:center;">Ganhos por Aplicativo/Empresa</h3>
+                <div id="report-chart-container" style="display:flex; justify-content:space-around; align-items:flex-end; height:180px; padding:10px 0; border-bottom:2px solid var(--border-color); position:relative; margin-bottom:24px;">
+                    <!-- Barras geradas por JS -->
+                </div>
+            </div>
+
+            <!-- Resumo Estatístico do Período -->
+            <div class="card mb-4" style="padding: 16px;">
+                <h3 style="font-size:1.1rem; margin-bottom:12px;">Estatísticas do Período</h3>
+                <div style="display:flex; flex-direction:column; gap:8px; font-size:0.9rem;">
+                    <div class="d-flex justify-between" style="border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:4px;">
+                        <span style="color:var(--text-secondary);">Soma KM Rodado:</span>
+                        <strong id="rep-stat-km">0.0 km</strong>
+                    </div>
+                    <div class="d-flex justify-between" style="border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:4px;">
+                        <span style="color:var(--text-secondary);">Média de Consumo (km/L):</span>
+                        <strong id="rep-stat-consumo">0.0 km/L</strong>
+                    </div>
+                    <div class="d-flex justify-between" style="border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:4px;">
+                        <span style="color:var(--text-secondary);">Média Preço Combustível:</span>
+                        <strong id="rep-stat-combustivel">R$ 0,00</strong>
+                    </div>
+                    <div class="d-flex justify-between" style="border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:4px;">
+                        <span style="color:var(--text-secondary);">Custo Combustível Médio/km:</span>
+                        <strong id="rep-stat-custo-km">R$ 0,00</strong>
+                    </div>
+                    <div class="d-flex justify-between" id="rep-stat-gastos-btn" style="border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:4px; cursor:pointer; color:var(--accent-danger);">
+                        <span style="text-decoration:underline;">Visualizar Gastos Extras:</span>
+                        <strong id="rep-stat-gastos">R$ 0,00 ➔</strong>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Listagem dos lançamentos do período -->
+            <div class="card" style="padding:16px;">
+                <h3 style="font-size:1.1rem; margin-bottom:12px;" id="report-list-title">Selecione um item no gráfico ou período</h3>
+                <div id="report-content" style="max-height: 250px; overflow-y: auto;">
+                    <!-- Lista dinâmica de dias/semanas/meses cadastrados -->
+                </div>
             </div>
         </div>
+
+        <!-- Modal Popup de Visualização de Detalhes de Gastos em Relatórios -->
+        <div id="report-expenses-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.95); z-index:2000; align-items:center; justify-content:center; padding: 20px;">
+            <div class="card" style="width:100%; max-width:420px; background:var(--bg-color); border:1px solid var(--accent-primary); box-shadow: var(--glow-primary);">
+                <h3 class="text-center" style="margin-bottom:16px;">Gastos Extras do Período</h3>
+                <div id="report-expenses-modal-list" style="display:flex; flex-direction:column; gap:8px; max-height:250px; overflow-y:auto; margin-bottom:20px; padding-right:4px;">
+                    <!-- Lista de despesas do período selecionado -->
+                </div>
+                <button id="btn-close-report-expenses-modal" type="button" class="btn btn-primary" style="padding:12px; font-size:1rem;">Fechar</button>
+            </div>
 
         <!-- PROFILE SCREEN -->
         <div id="profile-screen" class="screen">
