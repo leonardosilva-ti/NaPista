@@ -161,7 +161,7 @@
                 <h3>Lançamentos de Hoje</h3>
                 <div class="card">
                     <div id="dash-platform-inputs">
-                        <!-- Gerado vias JS -->
+                        <!-- Gerado via JS -->
                     </div>
                     
                     <hr style="border-color: var(--border-color); margin: 20px 0;">
@@ -175,25 +175,49 @@
                             <label>Consumo (KM/L)</label>
                             <input type="number" id="dash-consumo-dia" step="0.1" placeholder="Ex: 10">
                         </div>
-                        <div class="input-group">
+                        <div class="input-group" style="grid-column: span 2;">
                             <label>Preço Litro (R$)</label>
                             <input type="text" inputmode="numeric" id="dash-preco-litro" class="currency-mask" placeholder="Ex: 5,50">
                         </div>
-                        <div class="input-group" style="grid-column: span 2;">
-                            <label>Gastos (Alimentação, Outros)</label>
-                            <div id="dash-expenses-container" style="background: rgba(15, 23, 42, 0.4); padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 10px;">
-                                <div id="dash-expenses-list" style="display:flex; flex-direction:column; gap:6px; max-height:120px; overflow-y:auto; margin-bottom:10px;">
-                                    <!-- Lista dinâmica de gastos -->
-                                </div>
-                                <div class="d-flex" style="gap:8px;">
-                                    <input type="text" id="dash-new-expense-desc" placeholder="Desc. ex: Almoço" style="flex:2; padding:8px 12px; font-size:0.9rem;">
-                                    <input type="text" inputmode="numeric" id="dash-new-expense-val" class="currency-mask" placeholder="R$ 0,00" style="flex:1; padding:8px 12px; font-size:0.9rem;">
-                                    <button id="btn-add-expense" type="button" class="btn btn-secondary" style="width:auto; padding:0 14px; font-size:0.9rem; border-radius:10px;">+ Adicionar</button>
-                                </div>
-                            </div>
-                        </div>
                     </div>
-                    <button id="btn-save-day" class="btn btn-primary">Salvar Lançamentos</button>
+                    <button id="btn-save-day" class="btn btn-primary">Salvar Ganhos e Consumo</button>
+                </div>
+            </div>
+
+            <!-- Bloco de Gastos Geral (Exibido para Dia, Semana e Mês) -->
+            <div id="dash-expenses-section" style="margin-top: 10px; margin-bottom: 20px;">
+                <div class="d-flex justify-between align-center" style="margin-bottom: 12px;">
+                    <h3 style="margin-bottom: 0;">Gastos do Período</h3>
+                    <button id="btn-open-expense-modal" type="button" class="btn btn-secondary" style="width: auto; padding: 8px 16px; font-size: 0.85rem; border-radius: 10px;">💸 + Adicionar Gasto</button>
+                </div>
+                
+                <div class="card" style="padding: 16px;">
+                    <div id="dash-expenses-list" style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto;">
+                        <!-- Lista dinâmica de gastos do período -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal Pop-up para Adicionar/Editar Gasto -->
+            <div id="expense-popup-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.95); z-index:2000; align-items:center; justify-content:center; padding: 20px;">
+                <div class="card" style="width:100%; max-width:400px; background:var(--bg-color); border:1px solid var(--accent-primary); box-shadow: var(--glow-primary);">
+                    <h3 id="expense-modal-title" class="text-center" style="margin-bottom:16px;">Adicionar Gasto</h3>
+                    
+                    <input type="hidden" id="expense-modal-idx" value="">
+                    
+                    <div class="input-group">
+                        <label>Descrição do gasto</label>
+                        <input type="text" id="expense-modal-desc" placeholder="Ex: Almoço, Pedágio, Café">
+                    </div>
+                    <div class="input-group">
+                        <label>Valor gasto (R$)</label>
+                        <input type="text" inputmode="numeric" id="expense-modal-val" class="currency-mask" placeholder="R$ 0,00">
+                    </div>
+                    
+                    <div class="d-flex" style="gap:10px; margin-top:20px;">
+                        <button id="btn-close-expense-modal" type="button" class="btn btn-danger" style="flex:1; padding:12px; font-size:1rem;">Cancelar</button>
+                        <button id="btn-save-expense-modal" type="button" class="btn btn-primary" style="flex:1; padding:12px; font-size:1rem;">Confirmar</button>
+                    </div>
                 </div>
             </div>
         </div>
