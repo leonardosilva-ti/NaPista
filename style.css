@@ -150,12 +150,24 @@ input[type="text"]:focus {
 
 /* Dashboard Specific */
 .metric-large {
-    font-size: 3rem;
+    font-size: 8vw; /* Fonte responsiva com tamanho máximo */
+    max-font-size: 3rem;
     font-weight: 700;
     color: var(--accent-secondary);
     text-shadow: var(--glow-secondary);
     margin: 10px 0;
     cursor: pointer;
+    white-space: nowrap; /* Impede quebra de linha */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-block;
+    max-width: 100%;
+}
+
+@media (min-width: 600px) {
+    .metric-large {
+        font-size: 3rem;
+    }
 }
 
 .metric-danger {
