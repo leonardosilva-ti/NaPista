@@ -296,33 +296,35 @@
         </div>
 
         <!-- Modal Popup de Visualização de Detalhes de Gastos em Relatórios -->
-        <div id="report-expenses-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.95); z-index:2000; align-items:center; justify-content:center; padding: 20px;">
-            <div class="card" style="width:100%; max-width:420px; background:var(--bg-color); border:1px solid var(--accent-primary); box-shadow: var(--glow-primary);">
-                <h3 class="text-center" style="margin-bottom:16px;">Gastos Extras do Período</h3>
-                <div id="report-expenses-modal-list" style="display:flex; flex-direction:column; gap:8px; max-height:250px; overflow-y:auto; margin-bottom:20px; padding-right:4px;">
-                    <!-- Lista de despesas do período selecionado -->
-                </div>
-                <button id="btn-close-report-expenses-modal" type="button" class="btn btn-primary" style="padding:12px; font-size:1rem;">Fechar</button>
-            </div>
+		<!-- Modal Popup de Visualização de Detalhes de Gastos em Relatórios -->
+				<div id="report-expenses-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.95); z-index:2000; align-items:center; justify-content:center; padding: 20px;">
+					<div class="card" style="width:100%; max-width:420px; background:var(--bg-color); border:1px solid var(--accent-primary); box-shadow: var(--glow-primary);">
+						<h3 class="text-center" style="margin-bottom:16px;">Gastos Extras do Período</h3>
+						<div id="report-expenses-modal-list" style="display:flex; flex-direction:column; gap:8px; max-height:250px; overflow-y:auto; margin-bottom:20px; padding-right:4px;">
+							<!-- Lista de despesas do período selecionado -->
+						</div>
+						<button id="btn-close-report-expenses-modal" type="button" class="btn btn-primary" style="padding:12px; font-size:1rem;">Fechar</button>
+					</div>
+				</div> <!-- FECHAMENTO ADICIONADO AQUI -->
 
-        <!-- PROFILE SCREEN -->
-        <div id="profile-screen" class="screen">
-            <div class="d-flex align-center mb-4" style="gap:15px;">
-                <button class="nav-btn" data-target="dashboard-screen">🔙</button>
-                <h2>Configurações</h2>
-            </div>
-            
-            <div class="card">
-                <h3>Como usar?</h3>
-                <p style="font-size: 0.9rem;">Preencha os dados no Dashboard todos os dias. A meta será ajustada automaticamente se você rodar a mais ou a menos. Os abastecimentos servem para calcular seu consumo real.</p>
-            </div>
+				<!-- PROFILE SCREEN -->
+				<div id="profile-screen" class="screen">
+					<div class="d-flex align-center mb-4" style="gap:15px;">
+						<button class="nav-btn" data-target="dashboard-screen">🔙</button>
+						<h2>Configurações</h2>
+					</div>
+					
+					<div class="card">
+						<h3>Como usar?</h3>
+						<p style="font-size: 0.9rem;">Preencha os dados no Dashboard todos os dias. A meta será ajustada automaticamente se você rodar a mais ou a menos. Os abastecimentos servem para calcular seu consumo real.</p>
+					</div>
 
-            <div class="card">
-                <button id="btn-reconfig" class="btn btn-secondary mb-4">Alterar Metas</button>
-                <button id="btn-wipe-data" class="btn btn-danger mb-4">Zerar Conta e Dados</button>
-                <button id="btn-logout" class="btn btn-secondary">Sair</button>
-            </div>
-        </div>
+					<div class="card">
+						<button id="btn-reconfig" class="btn btn-secondary mb-4">Alterar Metas</button>
+						<button id="btn-wipe-data" class="btn btn-danger mb-4">Zerar Conta e Dados</button>
+						<button id="btn-logout" class="btn btn-secondary">Sair</button>
+					</div>
+				</div>
 
     </div>
 
