@@ -1,21 +1,18 @@
 {
-  "name": "Na Pista",
+  "id": "./",
+  "name": "Na Pista · Controle de Ganhos",
   "short_name": "Na Pista",
+  "description": "Controle de ganhos, gastos e metas para motoristas de aplicativo.",
+  "lang": "pt-BR",
   "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
-  "description": "Controle inteligente de ganhos e metas para motoristas de aplicativos.",
+  "orientation": "portrait",
+  "background_color": "#0b1120",
+  "theme_color": "#0b1120",
+  "categories": ["finance", "productivity"],
   "icons": [
-    {
-      "src": "icon.svg",
-      "sizes": "192x192",
-      "type": "image/svg+xml"
-    },
-    {
-      "src": "icon.svg",
-      "sizes": "512x512",
-      "type": "image/svg+xml"
-    }
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
   ]
 }

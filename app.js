@@ -1,1209 +1,1071 @@
-import { initAuth, login, logout } from './auth.js';
+import { initAuth, login, logout, hasValidToken, invalidateToken } from './auth.js';
 import { findDataFile, readData, saveData, deleteData } from './drive.js';
-import { defaultData, calculateTargets, getDayStats } from './logic.js';
+import * as L from './logic.js';
 
-let appData = null;
-let fileId = null;
-let currentScope = 'day'; // day, week, month
-let currentSelectedDate = new Date(); 
+// ═══════════════════════ Constantes ═══════════════════════
+const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
+const EXPENSE_SUGGESTIONS = ['Almoço', 'Lanche', 'Café', 'Água', 'Pedágio', 'Estacionamento', 'Lavagem', 'Manutenção'];
+const PLATFORM_COLORS = ['#10b981', '#60a5fa', '#f59e0b', '#a78bfa', '#f472b6', '#22d3ee', '#fb7185', '#84cc16'];
+const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+const WEEKDAYS_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const MONTHS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const MAIN_SCREENS = ['dashboard-screen', 'reports-screen', 'profile-screen'];
+const PENDING_KEY = 'napista_pending';
 
-// Para reverter à última data selecionada pelo usuário quando voltar ao escopo "day"
-let lastUserSelectedDate = null; 
+const ICON_TRASH = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>';
 
-// Lista de Despesas (descrição e valor) temporárias do dia selecionado
-let currentExpensesList = [];
-
-// Variáveis de controle de Relatórios
-let currentReportTab = 'tab-day';
-let currentReportExpenses = []; // Detalhe de gastos do período selecionado em relatório
-
-// Lista global de plataformas pré-cadastradas para seleção
-const PRESETS_PLATFORMS = ["Uber", "99 Drive (antigo 99)", "InDrive", "Particular", "Shoppe", "Mercado Livre"];
-
-// Helpers de Fuso Horário e Datas
-function getTodayDateString() {
-    const d = new Date();
-    const str = d.toLocaleString('en-CA', { timeZone: 'America/Sao_Paulo' }); // YYYY-MM-DD
-    return str.split(',')[0];
-}
-
-function getSelectedDateString() {
-    const yyyy = currentSelectedDate.getFullYear();
-    const mm = String(currentSelectedDate.getMonth() + 1).padStart(2, '0');
-    const dd = String(currentSelectedDate.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-}
-
-// Helpers para obter início e fim da semana corrente
-function getWeekStartEndDates(dateObj) {
-    const day = dateObj.getDay(); 
-    const diffToMonday = dateObj.getDate() - day + (day === 0 ? -6 : 1);
-    const monday = new Date(dateObj);
-    monday.setDate(diffToMonday);
-    
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    
-    return { monday, sunday };
-}
-
-// Helpers de Conversão de Moeda (Máscara)
-function parseCurrency(val) {
-    if (!val) return 0;
-    if (typeof val === 'number') return val;
-    const clearStr = val.toString().replace(/\./g, '').replace(',', '.');
-    return parseFloat(clearStr) || 0;
-}
-
-function applyCurrencyMask(e) {
-    let val = e.target.value.replace(/\D/g, '');
-    if (val === '') {
-        e.target.value = '';
-        updateDashboardTargets();
-        return;
-    }
-    const num = parseInt(val, 10) / 100;
-    e.target.value = num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    updateDashboardTargets();
-}
-
-// UI Screens
-const screens = document.querySelectorAll('.screen');
-
-// Navigation
-document.querySelectorAll('.nav-btn, .nav-btn-text').forEach(btn => {
-    btn.addEventListener('click', () => showScreen(btn.dataset.target));
-});
-
-function showScreen(screenId) {
-    screens.forEach(s => s.classList.remove('active'));
-    document.getElementById(screenId).classList.add('active');
-    
-    if (screenId === 'dashboard-screen') initDashboard();
-    if (screenId === 'reports-screen') initReports();
-}
-
-// Init
-window.onload = () => {
-    initAuth(onAuthenticated, () => {
-        showScreen('login-screen');
-    });
+// ═══════════════════════ Estado ═══════════════════════
+const state = {
+    data: null,
+    fileId: null,
+    scope: 'day',
+    anchor: L.startOfDay(new Date()),     // data de referência do período exibido
+    dayAnchor: L.startOfDay(new Date()),  // último dia escolhido (para voltar ao escopo "dia")
+    reportTab: 'days',
+    reportKey: null,
+    range: null,
+    setupPlatforms: [],
+    setupOptions: [],
+    editingExpense: null,
+    reportExpenses: []
 };
 
-// Login Flow
-document.getElementById('btn-login').addEventListener('click', login);
+// ═══════════════════════ Utilidades ═══════════════════════
+const $ = (id) => document.getElementById(id);
+const brl = (v) => (Number.isFinite(v) ? v : 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const fmt = (v, digits = 1) => (Number.isFinite(v) ? v : 0).toLocaleString('pt-BR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const todayDate = () => L.startOfDay(new Date());
+const settings = () => state.data.settings;
+const pad2 = (n) => String(n).padStart(2, '0');
+const shortDate = (d) => `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}`;
 
-async function onAuthenticated() {
-    showScreen('loading-screen');
-    try {
-        fileId = await findDataFile();
-        if (fileId) {
-            appData = await readData(fileId);
-            if (!appData || !appData.settings || !appData.settings.plataformas) {
-                renderSetup();
-                showScreen('setup-screen');
-            } else {
-                showScreen('dashboard-screen');
-            }
-        } else {
-            appData = JSON.parse(JSON.stringify(defaultData));
-            appData.settings.plataformas = [];
-            renderSetup();
-            showScreen('setup-screen');
+function parseDecimal(v) {
+    if (typeof v === 'number') return v;
+    const s = String(v ?? '').trim();
+    if (!s) return 0;
+    const normalized = s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s;
+    const n = parseFloat(normalized);
+    return Number.isFinite(n) ? n : 0;
+}
+
+const moneyInput = (v) => (v > 0 ? v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '');
+const decimalInput = (v) => (v > 0 ? String(Math.round(v * 100) / 100).replace('.', ',') : '');
+
+function maskMoney(input) {
+    const digits = input.value.replace(/\D/g, '').replace(/^0+/, '').slice(0, 9);
+    input.value = digits ? (parseInt(digits, 10) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : '';
+}
+
+function maskDecimal(input) {
+    let v = input.value.replace(/[^\d.,]/g, '').replace('.', ',');
+    const i = v.indexOf(',');
+    if (i !== -1) v = v.slice(0, i + 1) + v.slice(i + 1).replace(/,/g, '').slice(0, 2);
+    input.value = v.slice(0, 8);
+}
+
+function platformColor(name) {
+    const list = state.data?.settings?.plataformas || [];
+    let idx = list.indexOf(name);
+    if (idx === -1) idx = [...name].reduce((a, c) => a + c.charCodeAt(0), 0);
+    return PLATFORM_COLORS[idx % PLATFORM_COLORS.length];
+}
+
+function findDay(key) {
+    return state.data.history.find(h => h.date === key);
+}
+
+function getOrCreateDay(key) {
+    let day = findDay(key);
+    if (!day) {
+        day = { date: key, earnings: {}, km: 0, expenses: 0, detailedExpenses: [] };
+        state.data.history.push(day);
+        state.data.history.sort((a, b) => a.date.localeCompare(b.date));
+    }
+    return day;
+}
+
+function pruneDay(day) {
+    const empty = !Object.keys(day.earnings || {}).length && !L.num(day.km)
+        && !day.consumoL && !day.precoL && !(day.detailedExpenses || []).length;
+    if (empty) state.data.history = state.data.history.filter(h => h !== day);
+}
+
+function normalizeData(raw) {
+    const data = raw && typeof raw === 'object' ? raw : {};
+    data.settings = { ...L.defaultSettings(), ...(data.settings || {}) };
+    if (!Array.isArray(data.settings.plataformas)) data.settings.plataformas = [];
+
+    const seen = new Set();
+    data.history = (Array.isArray(data.history) ? data.history : []).filter(d => {
+        if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d.date) || seen.has(d.date)) return false;
+        seen.add(d.date);
+        return true;
+    });
+
+    data.history.forEach(d => {
+        if (!d.earnings || typeof d.earnings !== 'object') d.earnings = {};
+        if (!Array.isArray(d.detailedExpenses)) {
+            d.detailedExpenses = L.num(d.expenses) > 0 ? [{ desc: 'Gastos gerais', val: L.num(d.expenses) }] : [];
         }
+        d.expenses = L.dayExpenses(d);
+    });
+    data.history.sort((a, b) => a.date.localeCompare(b.date));
+    return data;
+}
+
+// ═══════════════════════ Feedback (toast / confirm) ═══════════════════════
+let toastTimer;
+function toast(message, { type = 'info', action, onAction, duration = 3500 } = {}) {
+    const el = $('toast');
+    const btn = $('toast-action');
+    $('toast-msg').textContent = message;
+    el.dataset.type = type;
+    btn.hidden = !action;
+    btn.textContent = action || '';
+    btn.onclick = () => { el.classList.remove('show'); onAction?.(); };
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), duration);
+}
+
+function confirmDialog({ title, message, confirmLabel = 'Confirmar', danger = false }) {
+    const dlg = $('confirm-dialog');
+    $('confirm-title').textContent = title;
+    $('confirm-message').textContent = message;
+    const ok = $('confirm-ok');
+    ok.textContent = confirmLabel;
+    ok.className = `btn ${danger ? 'btn-danger' : 'btn-primary'}`;
+    return new Promise(resolve => {
+        const done = (result) => { dlg.close(); resolve(result); };
+        ok.onclick = () => done(true);
+        $('confirm-cancel').onclick = () => done(false);
+        dlg.oncancel = () => resolve(false);
+        dlg.showModal();
+    });
+}
+
+// ═══════════════════════ Sincronização com o Drive ═══════════════════════
+let changeVersion = 0;
+let savedVersion = 0;
+let saveTimer = null;
+let inflight = null;
+let saveAgain = false;
+let authToastShown = false;
+
+const SYNC_LABELS = {
+    saved: 'Salvo',
+    pending: 'Alterado',
+    saving: 'Salvando…',
+    error: 'Não salvo · tentar',
+    auth: 'Toque para salvar',
+    offline: 'Offline'
+};
+
+function setSync(status) {
+    const pill = $('sync-pill');
+    pill.dataset.state = status;
+    $('sync-label').textContent = SYNC_LABELS[status];
+    pill.title = status === 'error' ? 'Toque para tentar salvar novamente'
+        : status === 'auth' ? 'Sua sessão do Google expirou. Toque para renovar e salvar.' : '';
+    if (status === 'auth' && !authToastShown) {
+        authToastShown = true;
+        toast('Sessão do Google expirou. Toque em "Salvar" para sincronizar.', {
+            action: 'Salvar', duration: 8000, onAction: () => flushSave(true)
+        });
+    }
+    if (status === 'saved') authToastShown = false;
+}
+
+const hasUnsaved = () => changeVersion !== savedVersion;
+
+function writePending() {
+    try {
+        localStorage.setItem(PENDING_KEY, JSON.stringify({ fileId: state.fileId, savedAt: Date.now(), data: state.data }));
+    } catch { /* sem espaço / modo privado */ }
+}
+
+function readPending() {
+    try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch { return null; }
+}
+
+function clearPending() {
+    try { localStorage.removeItem(PENDING_KEY); } catch { /* ignora */ }
+}
+
+/** Registra uma alteração: guarda cópia local e agenda envio ao Drive. */
+function markChanged(delay = 1500) {
+    changeVersion++;
+    writePending();
+    setSync('pending');
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(flushSave, delay);
+}
+
+/**
+ * Envia os dados ao Drive. Sem `interactive` (salvamento automático), não tenta
+ * renovar o login — o navegador bloquearia o popup fora de um clique.
+ */
+function flushSave(interactive = false) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    if (inflight) { saveAgain = true; return inflight; }
+    if (!hasUnsaved() || !state.data) return Promise.resolve();
+    if (!interactive && !hasValidToken()) { setSync('auth'); return Promise.resolve(); }
+
+    const version = changeVersion;
+    setSync('saving');
+    inflight = saveData(state.fileId, state.data)
+        .then(id => {
+            state.fileId = id;
+            savedVersion = version;
+            if (!hasUnsaved()) { clearPending(); setSync('saved'); }
+            else writePending();
+        })
+        .catch(err => {
+            console.error('Erro ao salvar:', err);
+            setSync(navigator.onLine ? 'error' : 'offline');
+        })
+        .finally(() => {
+            inflight = null;
+            if (saveAgain) { saveAgain = false; if (hasUnsaved()) flushSave(); }
+        });
+    return inflight;
+}
+
+function resetSync() {
+    clearTimeout(saveTimer);
+    changeVersion = savedVersion = 0;
+    saveAgain = false;
+    setSync('saved');
+}
+
+// ═══════════════════════ Navegação ═══════════════════════
+function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === id));
+    const isMain = MAIN_SCREENS.includes(id);
+    $('bottom-nav').hidden = !isMain;
+    $('appbar').hidden = !(isMain || id === 'setup-screen');
+    document.body.classList.toggle('has-nav', isMain);
+    document.querySelectorAll('.nav-item').forEach(b => {
+        const active = b.dataset.target === id;
+        b.classList.toggle('active', active);
+        if (active) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    });
+    window.scrollTo({ top: 0 });
+
+    if (id === 'dashboard-screen') renderDashboard();
+    if (id === 'reports-screen') renderReports();
+    if (id === 'profile-screen') renderProfile();
+}
+
+function showLoading(message = 'Carregando…') {
+    $('loading-message').textContent = message;
+    $('loading-spinner').hidden = false;
+    $('btn-retry').hidden = true;
+    showScreen('loading-screen');
+}
+
+function showLoadError(message, retry) {
+    $('loading-message').textContent = message;
+    $('loading-spinner').hidden = true;
+    const btn = $('btn-retry');
+    btn.hidden = false;
+    btn.onclick = retry;
+    showScreen('loading-screen');
+}
+
+// ═══════════════════════ Inicialização / login ═══════════════════════
+async function boot() {
+    showLoading();
+    try {
+        const hasSession = await initAuth();
+        if (hasSession) await loadUserData();
+        else showScreen('login-screen');
     } catch (e) {
         console.error(e);
-        alert(`Sua sessão expirou ou houve um problema de conexão. Por favor, autentique-se novamente com o Google para continuar.`);
-        showScreen('login-screen');
+        showLoadError('Não foi possível carregar o login do Google. Verifique sua conexão ou desative bloqueadores de anúncio.', () => location.reload());
     }
 }
 
-// --- SETUP SCREEN ---
-let tempPlatforms = [];
-
-function renderSetup() {
-    tempPlatforms = appData.settings.plataformas ? [...appData.settings.plataformas] : [];
-    
-    document.getElementById('setup-dias').value = appData.settings.diasTrabalhoMes || '';
-    document.getElementById('setup-meta').value = appData.settings.metaLiquidaMensal || '';
-    document.getElementById('setup-pagamento-km').value = appData.settings.mediaPagamentoKm || '';
-    document.getElementById('setup-consumo').value = appData.settings.mediaConsumoL || '';
-    document.getElementById('setup-preco-comb').value = appData.settings.mediaPrecoCombustivel || '';
-    
-    const btnSelect = document.getElementById('btn-select-apps-modal');
-    btnSelect.onclick = openAppsSelectionModal;
-    
-    const btnClose = document.getElementById('btn-close-apps-modal');
-    btnClose.onclick = closeAppsSelectionModal;
-
-    const btnAddOther = document.getElementById('btn-modal-add-other');
-    btnAddOther.onclick = addOtherPlatformFromModal;
-
-    renderPlatformsList();
-}
-
-function renderPlatformsList() {
-    const list = document.getElementById('setup-platforms-list');
-    list.innerHTML = '';
-    
-    if (tempPlatforms.length === 0) {
-        list.innerHTML = `<span style="font-size:0.9rem; color:var(--text-secondary); font-style:italic;">Nenhum selecionado. Clique no botão acima para adicionar.</span>`;
-        return;
+async function handleLogin() {
+    const btn = $('btn-login');
+    btn.disabled = true;
+    try {
+        await login(); // abre o popup de forma síncrona dentro do clique
+        await loadUserData();
+    } catch (e) {
+        console.error(e);
+        if (e?.type !== 'popup_closed') toast('Não foi possível entrar. Tente novamente.', { type: 'error' });
+    } finally {
+        btn.disabled = false;
     }
-    
-    tempPlatforms.forEach((p, idx) => {
-        const div = document.createElement('div');
-        div.className = 'platform-tag active';
-        div.style.margin = '4px';
-        div.innerHTML = `${p} <span style="margin-left:8px; font-weight:bold; color:var(--accent-danger); cursor:pointer;">x</span>`;
-        div.onclick = () => {
-            tempPlatforms.splice(idx, 1);
-            renderPlatformsList();
-        };
-        list.appendChild(div);
-    });
 }
 
-function openAppsSelectionModal() {
-    const modal = document.getElementById('apps-selection-modal');
-    const container = document.getElementById('modal-apps-list');
-    container.innerHTML = '';
-    
-    const allOptions = [...PRESETS_PLATFORMS];
-    tempPlatforms.forEach(p => {
-        if (!allOptions.includes(p)) {
-            allOptions.push(p);
+async function loadUserData() {
+    showLoading('Carregando seus dados…');
+    try {
+        const fileId = await findDataFile();
+        let data = fileId ? await readData(fileId) : null;
+        state.fileId = fileId;
+
+        resetSync();
+        const pending = readPending();
+        const recovered = !!(pending?.data && pending.fileId === fileId);
+        if (recovered) data = pending.data;
+        else clearPending();
+
+        state.data = normalizeData(data);
+        state.anchor = state.dayAnchor = todayDate();
+        state.scope = 'day';
+        renderPlatformInputs();
+
+        if (recovered) {
+            changeVersion = 1;
+            flushSave();
+            toast('Recuperamos alterações que não tinham sido salvas.');
         }
-    });
 
-    allOptions.forEach(p => {
-        const label = document.createElement('label');
-        label.style.display = 'flex';
-        label.style.alignItems = 'center';
-        label.style.gap = '10px';
-        label.style.fontSize = '1.05rem';
-        label.style.cursor = 'pointer';
-        label.style.padding = '6px 0';
-
-        const isChecked = tempPlatforms.includes(p);
-        label.innerHTML = `
-            <input type="checkbox" class="modal-app-checkbox" value="${p}" ${isChecked ? 'checked' : ''} style="width:20px; height:20px; cursor:pointer;">
-            <span>${p}</span>
-        `;
-        container.appendChild(label);
-    });
-
-    modal.style.display = 'flex';
-}
-
-function addOtherPlatformFromModal() {
-    const inp = document.getElementById('modal-other-app-name');
-    const value = inp.value.trim();
-    if (value) {
-        if (!tempPlatforms.includes(value)) {
-            tempPlatforms.push(value);
+        if (L.isConfigured(state.data.settings)) showScreen('dashboard-screen');
+        else openSetup();
+    } catch (e) {
+        console.error(e);
+        if (e?.name === 'AuthError' || e?.status === 401 || e?.status === 403) {
+            invalidateToken();
+            showScreen('login-screen');
+            toast('Sua sessão expirou. Entre novamente.');
+        } else {
+            showLoadError('Não foi possível acessar seu Google Drive. Verifique a conexão.', loadUserData);
         }
-        inp.value = '';
-        openAppsSelectionModal();
     }
 }
 
-function closeAppsSelectionModal() {
-    const modal = document.getElementById('apps-selection-modal');
-    
-    const checkedBoxes = document.querySelectorAll('.modal-app-checkbox:checked');
-    const selected = [];
-    checkedBoxes.forEach(box => {
-        selected.push(box.value);
-    });
+// ═══════════════════════ Configuração (metas) ═══════════════════════
+function openSetup() {
+    const s = settings();
+    const configured = L.isConfigured(s);
+    $('setup-title').textContent = configured ? 'Editar metas' : 'Primeiros passos';
+    $('btn-finish-setup').textContent = configured ? 'Salvar alterações' : 'Salvar e começar';
+    $('btn-cancel-setup').hidden = !configured;
 
-    tempPlatforms = selected;
-    modal.style.display = 'none';
-    renderPlatformsList();
+    $('setup-dias').value = s.diasTrabalhoMes || '';
+    $('setup-meta').value = moneyInput(L.num(s.metaLiquidaMensal));
+    $('setup-pagamento-km').value = moneyInput(L.num(s.mediaPagamentoKm));
+    $('setup-consumo').value = decimalInput(L.num(s.mediaConsumoL));
+    $('setup-preco-comb').value = moneyInput(L.num(s.mediaPrecoCombustivel));
+
+    state.setupPlatforms = [...s.plataformas];
+    state.setupOptions = [...new Set([...PRESET_PLATFORMS, ...s.plataformas])];
+    renderSetupPlatforms();
+    updateSetupPreview();
+    showScreen('setup-screen');
 }
 
-document.getElementById('btn-finish-setup').addEventListener('click', async () => {
-    const dias = parseInt(document.getElementById('setup-dias').value);
-    const meta = parseFloat(document.getElementById('setup-meta').value);
-    const pag = parseFloat(document.getElementById('setup-pagamento-km').value);
-    const cons = parseFloat(document.getElementById('setup-consumo').value);
-    const pre = parseFloat(document.getElementById('setup-preco-comb').value);
-
-    if (!dias || !meta || !pag || !cons || !pre || tempPlatforms.length === 0) {
-        alert("Preencha todos os campos e selecione pelo menos uma empresa/aplicativo.");
-        return;
-    }
-
-    appData.settings = {
-        diasTrabalhoMes: dias,
-        metaLiquidaMensal: meta,
-        mediaPagamentoKm: pag,
-        mediaConsumoL: cons,
-        mediaPrecoCombustivel: pre,
-        plataformas: tempPlatforms
+function readSetupForm() {
+    return {
+        diasTrabalhoMes: parseInt($('setup-dias').value, 10) || 0,
+        metaLiquidaMensal: parseDecimal($('setup-meta').value),
+        mediaPagamentoKm: parseDecimal($('setup-pagamento-km').value),
+        mediaConsumoL: parseDecimal($('setup-consumo').value),
+        mediaPrecoCombustivel: parseDecimal($('setup-preco-comb').value)
     };
-
-    showScreen('loading-screen');
-    try {
-        fileId = await saveData(fileId, appData);
-        isDashboardInitialized = false;
-        showScreen('dashboard-screen');
-    } catch (e) {
-        console.error(e);
-        alert("Erro ao salvar configurações.");
-    }
-});
-
-// --- DASHBOARD SCREEN ---
-let isDashboardInitialized = false;
-
-function initDashboard() {
-    if (!isDashboardInitialized) {
-        const todayParts = getTodayDateString().split('-');
-        currentSelectedDate = new Date(todayParts[0], todayParts[1] - 1, todayParts[2]);
-        lastUserSelectedDate = new Date(currentSelectedDate);
-
-        // Eventos do Navegador de Datas
-        document.getElementById('btn-prev-date').addEventListener('click', () => navigateDate(-1));
-        document.getElementById('btn-next-date').addEventListener('click', () => navigateDate(1));
-        
-        // Clique na data para abrir picker nativo
-        document.getElementById('dash-date-click-area').addEventListener('click', () => {
-            if (currentScope === 'day') {
-                const picker = document.getElementById('native-date-picker');
-                picker.value = getSelectedDateString();
-                picker.showPicker();
-            } else if (currentScope === 'week') {
-                const picker = document.getElementById('native-week-picker');
-                picker.showPicker();
-            } else if (currentScope === 'month') {
-                const picker = document.getElementById('native-month-picker');
-                const yyyy = currentSelectedDate.getFullYear();
-                const mm = String(currentSelectedDate.getMonth() + 1).padStart(2, '0');
-                picker.value = `${yyyy}-${mm}`;
-                picker.showPicker();
-            }
-        });
-
-        // Listeners dos inputs nativos de data
-        document.getElementById('native-date-picker').addEventListener('change', (e) => {
-            if (e.target.value) {
-                const parts = e.target.value.split('-');
-                currentSelectedDate = new Date(parts[0], parts[1] - 1, parts[2]);
-                lastUserSelectedDate = new Date(currentSelectedDate);
-                updateDateDisplay();
-                loadDashboardData();
-            }
-        });
-
-        document.getElementById('native-week-picker').addEventListener('change', (e) => {
-            if (e.target.value) {
-                const parts = e.target.value.split('-W');
-                if (parts.length === 2) {
-                    const year = parseInt(parts[0], 10);
-                    const week = parseInt(parts[1], 10);
-                    const simple = new Date(year, 0, 1 + (week - 1) * 7);
-                    const dow = simple.getDay();
-                    const ISOweekStart = simple;
-                    if (dow <= 4) {
-                        ISOweekStart.setDate(simple.getDate() - simple.getDay() + 1);
-                    } else {
-                        ISOweekStart.setDate(simple.getDate() + 8 - simple.getDay());
-                    }
-                    currentSelectedDate = ISOweekStart;
-                    updateDateDisplay();
-                    loadDashboardData();
-                }
-            }
-        });
-
-        document.getElementById('native-month-picker').addEventListener('change', (e) => {
-            if (e.target.value) {
-                const parts = e.target.value.split('-');
-                if (parts.length === 2) {
-                    currentSelectedDate = new Date(parts[0], parts[1] - 1, 1);
-                    updateDateDisplay();
-                    loadDashboardData();
-                }
-            }
-        });
-
-        // Eventos dos Modais de Despesas
-        document.getElementById('btn-open-expense-modal').addEventListener('click', () => {
-            openExpenseModal();
-        });
-
-        document.getElementById('btn-close-expense-modal').addEventListener('click', () => {
-            closeExpenseModal();
-        });
-
-        document.getElementById('btn-save-expense-modal').addEventListener('click', () => {
-            saveExpenseFromModal();
-        });
-
-        // Render Platform Inputs just once per settings
-        const platContainer = document.getElementById('dash-platform-inputs');
-        platContainer.innerHTML = '';
-        appData.settings.plataformas.forEach(p => {
-            const group = document.createElement('div');
-            group.className = 'input-group';
-            group.style.marginBottom = '12px';
-            group.innerHTML = `
-                <label>Ganho ${p} (R$)</label>
-                <input type="text" inputmode="numeric" class="plat-input live-calc currency-mask" data-plat="${p}" placeholder="0,00">
-            `;
-            platContainer.appendChild(group);
-        });
-
-        // Listeners for live calc
-        document.querySelectorAll('.currency-mask').forEach(inp => {
-            inp.addEventListener('input', applyCurrencyMask);
-        });
-        
-        document.getElementById('dash-km').addEventListener('input', updateDashboardTargets);
-        document.getElementById('dash-consumo-dia').addEventListener('input', updateDashboardTargets);
-
-        // Scope Tabs
-        document.querySelectorAll('.dash-tab-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('.dash-tab-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                currentScope = btn.dataset.scope;
-                
-                const lancSection = document.getElementById('dash-lancamentos-section');
-                const btnAddExpense = document.getElementById('btn-open-expense-modal');
-                if (currentScope === 'day') {
-                    lancSection.style.display = 'block';
-                    btnAddExpense.style.display = 'block';
-                    if (lastUserSelectedDate) {
-                        currentSelectedDate = new Date(lastUserSelectedDate);
-                    }
-                } else {
-                    lancSection.style.display = 'none';
-                    btnAddExpense.style.display = 'none';
-                }
-                
-                updateDateDisplay();
-                loadDashboardData();
-            });
-        });
-
-        isDashboardInitialized = true;
-    }
-    
-    updateDateDisplay();
-    loadDashboardData();
 }
 
-const diasSemana = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
-const mesesAno = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+function updateSetupPreview() {
+    const f = readSetupForm();
+    const el = $('setup-preview');
+    if (!f.mediaConsumoL || !f.mediaPrecoCombustivel || !f.mediaPagamentoKm) { el.hidden = true; return; }
 
-function updateDateDisplay() {
-    const displayTop = document.getElementById('dash-date-display-top');
-    const displayMain = document.getElementById('dash-date-display');
-    const todayStr = getTodayDateString();
-    const selectedStr = getSelectedDateString();
-    
-    if (currentScope === 'day') {
-        const d = String(currentSelectedDate.getDate()).padStart(2, '0');
-        const m = String(currentSelectedDate.getMonth() + 1).padStart(2, '0');
-        const y = currentSelectedDate.getFullYear();
-        const nomeDia = diasSemana[currentSelectedDate.getDay()];
-        
-        if (todayStr === selectedStr) {
-            displayTop.style.display = 'block';
-            displayTop.textContent = "Hoje";
-            displayMain.innerHTML = `${d}/${m}/${y} - ${nomeDia}`;
-        } else {
-            displayTop.style.display = 'none';
-            displayMain.innerHTML = `${d}/${m}/${y} - ${nomeDia}`;
-        }
-    } 
-    else if (currentScope === 'week') {
-        displayTop.style.display = 'none';
-        
-        const { monday, sunday } = getWeekStartEndDates(currentSelectedDate);
-        
-        const mD = String(monday.getDate()).padStart(2, '0');
-        const mM = String(monday.getMonth() + 1).padStart(2, '0');
-        const mY = monday.getFullYear();
-        
-        const sD = String(sunday.getDate()).padStart(2, '0');
-        const sM = String(sunday.getMonth() + 1).padStart(2, '0');
-        const sY = sunday.getFullYear();
-        
-        displayMain.innerHTML = `${mD}/${mM}/${mY} - ${sD}/${sM}/${sY}`;
+    const custoKm = f.mediaPrecoCombustivel / f.mediaConsumoL;
+    const lucroKm = f.mediaPagamentoKm - custoKm;
+    el.hidden = false;
+    el.classList.toggle('warn', lucroKm <= 0);
+
+    if (lucroKm <= 0) {
+        el.innerHTML = `<div>O combustível custa <strong>${brl(custoKm)}/km</strong>, mais do que você recebe por km. Assim não há lucro. Revise os valores.</div>`;
+        return;
     }
-    else if (currentScope === 'month') {
-        displayTop.style.display = 'none';
-        const nomeMes = mesesAno[currentSelectedDate.getMonth()];
-        const y = currentSelectedDate.getFullYear();
-        displayMain.innerHTML = `${nomeMes} ${y}`;
+
+    const rows = [
+        ['Custo de combustível por km', brl(custoKm)],
+        ['Lucro por km', brl(lucroKm)]
+    ];
+    if (f.metaLiquidaMensal && f.diasTrabalhoMes) {
+        const metaDia = f.metaLiquidaMensal / f.diasTrabalhoMes;
+        rows.push(['Meta líquida por dia', brl(metaDia)]);
+        rows.push(['Rodagem estimada por dia', `${fmt(metaDia / lucroKm, 0)} km`]);
     }
+    el.innerHTML = rows.map(([k, v]) => `<div class="preview-row"><span>${k}</span><strong>${v}</strong></div>`).join('');
+}
+
+function renderSetupPlatforms() {
+    $('setup-platforms').innerHTML = state.setupOptions.map(p => `
+        <button type="button" class="chip" data-platform="${esc(p)}" aria-pressed="${state.setupPlatforms.includes(p)}">${esc(p)}</button>
+    `).join('');
+}
+
+function addCustomPlatform() {
+    const input = $('setup-other-app');
+    const name = input.value.trim().replace(/\s+/g, ' ');
+    if (!name) return;
+    const existing = state.setupOptions.find(p => p.toLowerCase() === name.toLowerCase());
+    const finalName = existing || name;
+    if (!existing) state.setupOptions.push(finalName);
+    if (!state.setupPlatforms.includes(finalName)) state.setupPlatforms.push(finalName);
+    input.value = '';
+    renderSetupPlatforms();
+}
+
+function saveSetup(e) {
+    e.preventDefault();
+    const f = readSetupForm();
+    const fail = (msg, id) => { toast(msg, { type: 'error' }); if (id) $(id).focus(); };
+
+    if (!(f.metaLiquidaMensal > 0)) return fail('Informe sua meta líquida mensal.', 'setup-meta');
+    if (!(f.diasTrabalhoMes >= 1 && f.diasTrabalhoMes <= 31)) return fail('Dias de trabalho devem estar entre 1 e 31.', 'setup-dias');
+    if (!(f.mediaPagamentoKm > 0)) return fail('Informe a média que você aceita por km.', 'setup-pagamento-km');
+    if (!(f.mediaConsumoL > 0)) return fail('Informe o consumo médio do veículo.', 'setup-consumo');
+    if (!(f.mediaPrecoCombustivel > 0)) return fail('Informe o preço do litro.', 'setup-preco-comb');
+    if (f.mediaPagamentoKm <= f.mediaPrecoCombustivel / f.mediaConsumoL) return fail('O custo do combustível por km está maior que o ganho por km.', 'setup-pagamento-km');
+    if (!state.setupPlatforms.length) return fail('Selecione pelo menos um aplicativo.');
+
+    const wasConfigured = L.isConfigured(settings());
+    // mantém a ordem das opções exibidas
+    const plataformas = state.setupOptions.filter(p => state.setupPlatforms.includes(p));
+    state.data.settings = { ...settings(), ...f, plataformas };
+    renderPlatformInputs();
+    markChanged(0);
+    toast(wasConfigured ? 'Metas atualizadas.' : 'Tudo pronto! Bom trabalho na pista.');
+    showScreen('dashboard-screen');
+}
+
+// ═══════════════════════ Início (dashboard) ═══════════════════════
+function renderPlatformInputs() {
+    $('platform-inputs').innerHTML = settings().plataformas.map(p => `
+        <label class="field field-inline">
+            <span class="field-label"><span class="plat-dot" style="--c:${platformColor(p)}"></span>${esc(p)}</span>
+            <span class="input-wrap"><span class="prefix">R$</span><input type="text" inputmode="numeric" class="money day-input plat-input" data-plat="${esc(p)}" placeholder="0,00" autocomplete="off"></span>
+        </label>
+    `).join('');
+}
+
+const dayKey = () => L.toDateKey(state.anchor);
+
+function renderDashboard() {
+    if (!state.data) return;
+    const isDay = state.scope === 'day';
+    document.querySelectorAll('#scope-seg .seg-btn').forEach(b => {
+        const active = b.dataset.scope === state.scope;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', active);
+    });
+    $('day-entry').hidden = !isDay;
+    $('btn-add-expense').hidden = !isDay;
+    renderDateNav();
+    if (isDay) fillDayForm();
+    refreshDashboard();
+}
+
+function refreshDashboard() {
+    const r = L.calculateTargets(state.scope, settings(), state.data.history, state.anchor, new Date());
+    renderHero(r);
+    renderStats(r.summary);
+    renderExpenses(r.summary);
+}
+
+function renderDateNav() {
+    const a = state.anchor;
+    const today = todayDate();
+    const { start, end } = L.getPeriodRange(state.scope, a);
+    const containsToday = today >= start && today <= end;
+    let title, sub;
+
+    if (state.scope === 'day') {
+        const diff = Math.round((a - today) / 86400000);
+        title = diff === 0 ? 'Hoje' : diff === -1 ? 'Ontem' : diff === 1 ? 'Amanhã' : WEEKDAYS[a.getDay()];
+        sub = `${diff >= -1 && diff <= 1 ? WEEKDAYS[a.getDay()] + ', ' : ''}${a.getDate()} de ${MONTHS[a.getMonth()].toLowerCase()}${a.getFullYear() !== today.getFullYear() ? ' de ' + a.getFullYear() : ''}`;
+    } else if (state.scope === 'week') {
+        const weeksDiff = Math.round((start - L.getWeekRange(today).start) / (7 * 86400000));
+        title = weeksDiff === 0 ? 'Esta semana' : weeksDiff === -1 ? 'Semana passada' : 'Semana';
+        sub = `${shortDate(start)} a ${shortDate(end)}${end.getFullYear() !== today.getFullYear() ? '/' + end.getFullYear() : ''}`;
+    } else {
+        title = `${MONTHS[a.getMonth()]}${a.getFullYear() !== today.getFullYear() ? ' ' + a.getFullYear() : ''}`;
+        sub = containsToday ? 'Este mês' : `${shortDate(start)} a ${shortDate(end)}`;
+    }
+
+    $('date-title').textContent = title;
+    $('date-sub').textContent = sub;
+    $('btn-today').hidden = containsToday;
 }
 
 function navigateDate(direction) {
-    if (currentScope === 'day') {
-        currentSelectedDate.setDate(currentSelectedDate.getDate() + direction);
-        lastUserSelectedDate = new Date(currentSelectedDate);
-    } else if (currentScope === 'week') {
-        currentSelectedDate.setDate(currentSelectedDate.getDate() + (direction * 7));
-    } else if (currentScope === 'month') {
-        currentSelectedDate.setMonth(currentSelectedDate.getMonth() + direction);
-    }
-    updateDateDisplay();
-    loadDashboardData();
+    const a = new Date(state.anchor);
+    if (state.scope === 'day') a.setDate(a.getDate() + direction);
+    else if (state.scope === 'week') a.setDate(a.getDate() + direction * 7);
+    else { a.setDate(1); a.setMonth(a.getMonth() + direction); }
+    setAnchor(a);
 }
 
-// Controladores do Pop-up/Modal de Gastos
-function openExpenseModal(idx = null) {
-    const modal = document.getElementById('expense-popup-modal');
-    const title = document.getElementById('expense-modal-title');
-    const idxInput = document.getElementById('expense-modal-idx');
-    const descInput = document.getElementById('expense-modal-desc');
-    const valInput = document.getElementById('expense-modal-val');
-
-    if (idx !== null && idx >= 0 && idx < currentExpensesList.length) {
-        title.textContent = "Editar Gasto";
-        idxInput.value = idx;
-        descInput.value = currentExpensesList[idx].desc;
-        valInput.value = currentExpensesList[idx].val.toLocaleString('pt-BR', {minimumFractionDigits: 2});
-    } else {
-        title.textContent = "Adicionar Gasto";
-        idxInput.value = "";
-        descInput.value = "";
-        valInput.value = "";
-    }
-
-    modal.style.display = "flex";
+function setAnchor(date) {
+    state.anchor = L.startOfDay(date);
+    if (state.scope === 'day') state.dayAnchor = new Date(state.anchor);
+    renderDashboard();
 }
 
-// Fechamento modal setup
-window.closeExpenseModal = () => {
-    closeExpenseModal();
-};
-
-function closeExpenseModal() {
-    const modal = document.getElementById('expense-popup-modal');
-    modal.style.display = "none";
+function setScope(scope) {
+    if (scope === state.scope) return;
+    if (scope === 'day') {
+        // Volta ao último dia escolhido se ele estiver no período exibido;
+        // senão, hoje (se estiver no período) ou o primeiro dia do período.
+        const { start, end } = L.getPeriodRange(state.scope, state.anchor);
+        const today = todayDate();
+        const inRange = (d) => d >= start && d <= end;
+        state.anchor = inRange(state.dayAnchor) ? new Date(state.dayAnchor) : inRange(today) ? today : new Date(start);
+        state.dayAnchor = new Date(state.anchor);
+    }
+    state.scope = scope;
+    renderDashboard();
 }
 
-function saveExpenseFromModal() {
-    const idxVal = document.getElementById('expense-modal-idx').value;
-    const desc = document.getElementById('expense-modal-desc').value.trim();
-    const val = parseCurrency(document.getElementById('expense-modal-val').value);
-
-    if (!desc) {
-        alert("Informe a descrição do gasto.");
-        return;
-    }
-    if (val <= 0) {
-        alert("Informe um valor de gasto maior que R$ 0,00.");
-        return;
-    }
-
-    if (idxVal !== "") {
-        const idx = parseInt(idxVal, 10);
-        currentExpensesList[idx] = { desc, val };
-    } else {
-        currentExpensesList.push({ desc, val });
-    }
-
-    closeExpenseModal();
-    renderExpensesList();
-    updateDashboardTargets();
-}
-
-function renderExpensesList() {
-    const listDiv = document.getElementById('dash-expenses-list');
-    listDiv.innerHTML = '';
-    
-    let listToDisplay = [];
-    
-    if (currentScope === 'day') {
-        listToDisplay = currentExpensesList.map((item, idx) => ({ ...item, date: getSelectedDateString(), originalIdx: idx }));
-    } else {
-        const targetDateObj = new Date(getSelectedDateString() + 'T12:00:00');
-        const currentMonth = targetDateObj.getMonth();
-        const currentYear = targetDateObj.getFullYear();
-        
-        let filteredHistory = [];
-        if (currentScope === 'month') {
-            filteredHistory = appData.history.filter(item => {
-                const itemDate = new Date(item.date + 'T12:00:00');
-                return itemDate.getMonth() === currentMonth && itemDate.getFullYear() === currentYear;
-            });
-        } else if (currentScope === 'week') {
-            const { monday, sunday } = getWeekStartEndDates(currentSelectedDate);
-            const mStr = monday.toISOString().split('T')[0];
-            const sStr = sunday.toISOString().split('T')[0];
-            filteredHistory = appData.history.filter(item => item.date >= mStr && item.date <= sStr);
-        }
-
-        filteredHistory.forEach(day => {
-            if (Array.isArray(day.detailedExpenses)) {
-                day.detailedExpenses.forEach(exp => {
-                    listToDisplay.push({ desc: `${exp.desc} (${day.date.split('-')[2]}/${day.date.split('-')[1]})`, val: exp.val, isReadOnly: true });
-                });
-            } else if (day.expenses > 0) {
-                listToDisplay.push({ desc: `Gastos gerais (${day.date.split('-')[2]}/${day.date.split('-')[1]})`, val: day.expenses, isReadOnly: true });
-            }
-        });
-    }
-
-    if (listToDisplay.length === 0) {
-        listDiv.innerHTML = `<span style="font-size:0.85rem; color:var(--text-secondary); font-style:italic; text-align:center; padding: 10px 0;">Nenhum gasto registrado para este período.</span>`;
-        return;
-    }
-
-    listToDisplay.forEach((exp) => {
-        const item = document.createElement('div');
-        item.className = 'd-flex justify-between align-center';
-        item.style.background = 'rgba(255, 255, 255, 0.03)';
-        item.style.padding = '8px 12px';
-        item.style.borderRadius = '8px';
-        item.style.fontSize = '0.9rem';
-        item.style.border = '1px solid rgba(255,255,255,0.02)';
-        
-        let actionsHtml = '';
-        if (!exp.isReadOnly && currentScope === 'day') {
-            actionsHtml = `
-                <div class="d-flex align-center" style="gap:10px;">
-                    <span style="font-weight:600; color:var(--accent-danger)">R$ ${exp.val.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
-                    <button type="button" class="btn-edit-inline" style="background:none; border:none; color:var(--accent-primary); cursor:pointer; font-weight:600; font-size:0.85rem; padding: 2px 6px;" onclick="window.editExpenseItem(${exp.originalIdx})">Editar</button>
-                    <span style="color:var(--accent-danger); font-weight:bold; cursor:pointer; font-size:1.1rem; padding: 0 4px;" onclick="window.removeExpenseItem(${exp.originalIdx})">x</span>
-                </div>
-            `;
-        } else {
-            actionsHtml = `<span style="font-weight:600; color:var(--accent-danger)">R$ ${exp.val.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>`;
-        }
-
-        item.innerHTML = `
-            <span>${exp.desc}</span>
-            ${actionsHtml}
-        `;
-        listDiv.appendChild(item);
-    });
-}
-
-window.removeExpenseItem = (idx) => {
-    currentExpensesList.splice(idx, 1);
-    renderExpensesList();
-    updateDashboardTargets();
-};
-
-window.editExpenseItem = (idx) => {
-    openExpenseModal(idx);
-};
-
-function loadDashboardData() {
-    const selectedDate = getSelectedDateString();
-    const dayStats = getDayStats(appData.history, selectedDate);
-    
-    document.querySelectorAll('.plat-input').forEach(inp => {
-        const val = dayStats.earnings[inp.dataset.plat];
-        if (val) {
-            inp.value = val.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-        } else {
-            inp.value = '';
-        }
-    });
-
-    document.getElementById('dash-km').value = dayStats.km || '';
-    document.getElementById('dash-consumo-dia').value = dayStats.consumoL || '';
-    
-    if (dayStats.precoL) {
-        document.getElementById('dash-preco-litro').value = dayStats.precoL.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-    } else {
-        document.getElementById('dash-preco-litro').value = '';
-    }
-    
-    const savedDayData = appData.history.find(h => h.date === selectedDate);
-    if (savedDayData && Array.isArray(savedDayData.detailedExpenses)) {
-        currentExpensesList = [...savedDayData.detailedExpenses];
-    } else if (dayStats.expenses > 0) {
-        currentExpensesList = [{ desc: 'Gastos gerais', val: dayStats.expenses }];
-    } else {
-        currentExpensesList = [];
-    }
-
-    renderExpensesList();
-    updateDashboardTargets();
-}
-
-function updateDashboardTargets() {
-    const selectedDate = getSelectedDateString();
-    
-    const currentDayInputs = { earnings: {}, km: 0, consumoL: 0, precoL: 0, expenses: 0, detailedExpenses: [] };
-    let currentTotalEarned = 0;
-    
-    document.querySelectorAll('.plat-input').forEach(inp => {
-        const val = parseCurrency(inp.value);
-        if (val > 0) {
-            currentDayInputs.earnings[inp.dataset.plat] = val;
-            currentTotalEarned += val;
-        }
-    });
-    
-    currentDayInputs.km = parseFloat(document.getElementById('dash-km').value) || 0;
-    currentDayInputs.consumoL = parseFloat(document.getElementById('dash-consumo-dia').value) || appData.settings.mediaConsumoL;
-    
-    const pL = parseCurrency(document.getElementById('dash-preco-litro').value);
-    currentDayInputs.precoL = pL > 0 ? pL : appData.settings.mediaPrecoCombustivel;
-    
-    const totalExpenses = currentExpensesList.reduce((acc, item) => acc + item.val, 0);
-    currentDayInputs.expenses = totalExpenses;
-    currentDayInputs.detailedExpenses = currentExpensesList;
-    
-    const stats = calculateTargets(currentScope, appData.settings, appData.history, selectedDate, currentDayInputs);
-    
-    const dashFalta = document.getElementById('dash-falta-hoje');
-    const dashMeta = document.getElementById('dash-meta-diaria-info');
-    const dashSugerida = document.getElementById('dash-meta-sugerida');
-    const dashKm = document.getElementById('dash-km-recomendado');
-    const bar = document.getElementById('dash-progress-bar');
-    const elBruto = document.getElementById('dash-total-bruto');
-    const elLiquido = document.getElementById('dash-total-liquido');
-
-    if (stats.error) {
-        dashFalta.textContent = "Erro!";
-        dashMeta.textContent = stats.error;
-        dashSugerida.style.display = 'none';
-        return;
-    }
-
-    const bruto = stats.periodoGanhoBruto || 0;
-    const liquido = stats.periodoLucroLiquido || 0;
-    elBruto.textContent = `R$ ${bruto.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
-    elLiquido.textContent = `R$ ${liquido.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
-    elLiquido.style.color = liquido >= 0 ? 'var(--accent-secondary)' : 'var(--accent-danger)';
-
-    if (stats.metaAlcancada) {
-        dashFalta.textContent = `+ R$ ${stats.excedente.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
-        dashFalta.className = 'metric-large';
-        dashMeta.textContent = "Parabéns, você bateu a meta! 🎉";
-        dashSugerida.style.display = 'none';
-        dashKm.textContent = "Uma folga sempre é bem vinda!";
-        bar.style.width = '100%';
-        bar.style.background = 'var(--accent-secondary)';
-    } else {
-        const metaOriginal = stats.metaBrutaPeriodoRestante;
-        const faltaValor = metaOriginal - currentTotalEarned;
-        
-        if (faltaValor <= 0) {
-            dashFalta.textContent = `+ R$ ${Math.abs(faltaValor).toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
-            dashFalta.className = 'metric-large';
-            dashMeta.textContent = `Parabéns, você bateu a meta! 🎉`;
-            dashSugerida.style.display = 'none';
-            bar.style.width = '100%';
-            bar.style.background = 'var(--accent-secondary)';
-        } else {
-            dashFalta.textContent = `R$ ${faltaValor.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
-            dashFalta.className = 'metric-large metric-danger';
-            
-            let label = 'Meta base diária';
-            if (currentScope === 'week') label = 'Meta total restante da semana';
-            if (currentScope === 'month') label = 'Meta total restante do mês';
-            
-            dashMeta.textContent = `${label}: R$ ${metaOriginal.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
-            
-            if (currentScope === 'day') {
-                dashSugerida.style.display = 'none';
-            } else {
-                dashSugerida.style.display = 'block';
-                const sLabel = currentScope === 'week' ? 'semana' : 'mês';
-                dashSugerida.textContent = `Para bater a meta da ${sLabel}, sugerimos: R$ ${stats.metaBrutaDiariaSugerida.toLocaleString('pt-BR', {minimumFractionDigits:2})} / dia`;
-            }
-            
-            const perc = (currentTotalEarned / metaOriginal) * 100;
-            bar.style.width = `${perc}%`;
-            bar.style.background = 'var(--accent-primary)';
-        }
-        dashKm.textContent = `Recomendado rodar: ${stats.kmPeriodoRestante.toFixed(0)} km`;
-    }
-}
-
-document.getElementById('btn-save-day').addEventListener('click', async () => {
-    const selectedDate = getSelectedDateString();
-    let dayData = appData.history.find(h => h.date === selectedDate);
-    
-    if (!dayData) {
-        dayData = { date: selectedDate, earnings: {}, km: 0, consumoL: 0, precoL: 0, expenses: 0, detailedExpenses: [] };
-        appData.history.push(dayData);
-    }
-
-    document.querySelectorAll('.plat-input').forEach(inp => {
-        const val = parseCurrency(inp.value);
-        if (val > 0) dayData.earnings[inp.dataset.plat] = val;
-        else delete dayData.earnings[inp.dataset.plat];
-    });
-
-    dayData.km = parseFloat(document.getElementById('dash-km').value) || 0;
-    
-    const consDia = document.getElementById('dash-consumo-dia').value;
-    if (consDia) dayData.consumoL = parseFloat(consDia);
-    else delete dayData.consumoL;
-    
-    const precoDia = parseCurrency(document.getElementById('dash-preco-litro').value);
-    if (precoDia > 0) dayData.precoL = precoDia;
-    else delete dayData.precoL;
-    
-    dayData.expenses = currentExpensesList.reduce((acc, item) => acc + item.val, 0);
-    dayData.detailedExpenses = [...currentExpensesList];
-
-    document.getElementById('btn-save-day').textContent = "Salvando...";
+function openDatePicker() {
+    const picker = $('date-picker');
+    picker.value = L.toDateKey(state.anchor);
     try {
-        fileId = await saveData(fileId, appData);
-        document.getElementById('btn-save-day').textContent = "Salvo!";
-        setTimeout(() => { document.getElementById('btn-save-day').textContent = "Salvar Ganhos e Consumo"; }, 2000);
-        updateDashboardTargets();
-    } catch(e) {
-        alert("Erro ao salvar.");
-        document.getElementById('btn-save-day').textContent = "Salvar Ganhos e Consumo";
+        if (typeof picker.showPicker === 'function') picker.showPicker();
+        else { picker.focus(); picker.click(); }
+    } catch {
+        picker.focus();
+        picker.click();
     }
-});
+}
 
-// --- REPORTS SCREEN ---
-function initReports() {
-    // Configurar listeners de tabs dos relatórios
-    document.querySelectorAll('.report-tab-btn').forEach(btn => {
-        btn.onclick = () => {
-            document.querySelectorAll('.report-tab-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            currentReportTab = btn.dataset.tab;
-            
-            const customPeriodSection = document.getElementById('report-custom-period');
-            if (currentReportTab === 'tab-other') {
-                customPeriodSection.style.display = 'block';
-            } else {
-                customPeriodSection.style.display = 'none';
-            }
-            
-            renderReports(currentReportTab);
-        };
+function fillDayForm() {
+    const s = settings();
+    const day = findDay(dayKey());
+    document.querySelectorAll('.plat-input').forEach(inp => {
+        inp.value = moneyInput(L.num(day?.earnings?.[inp.dataset.plat]));
     });
-
-    document.getElementById('btn-apply-custom-period').onclick = () => {
-        renderReports('tab-other');
-    };
-
-    document.getElementById('rep-stat-gastos-btn').onclick = () => {
-        openReportExpensesModal();
-    };
-
-    document.getElementById('btn-close-report-expenses-modal').onclick = () => {
-        document.getElementById('report-expenses-modal').style.display = 'none';
-    };
-
-    renderReports(currentReportTab);
+    $('day-km').value = decimalInput(L.num(day?.km));
+    $('day-consumo').value = decimalInput(L.num(day?.consumoL));
+    $('day-preco').value = moneyInput(L.num(day?.precoL));
+    $('day-consumo').placeholder = fmt(L.num(s.mediaConsumoL));
+    $('day-preco').placeholder = moneyInput(L.num(s.mediaPrecoCombustivel));
 }
 
-function openReportExpensesModal() {
-    const modal = document.getElementById('report-expenses-modal');
-    const container = document.getElementById('report-expenses-modal-list');
-    container.innerHTML = '';
+function commitDayForm() {
+    const key = dayKey();
+    let day = findDay(key);
+    const earnings = { ...(day?.earnings || {}) }; // preserva apps que não estão mais nas configurações
+    document.querySelectorAll('.plat-input').forEach(inp => {
+        const v = parseDecimal(inp.value);
+        if (v > 0) earnings[inp.dataset.plat] = v;
+        else delete earnings[inp.dataset.plat];
+    });
+    const km = parseDecimal($('day-km').value);
+    const consumo = parseDecimal($('day-consumo').value);
+    const preco = parseDecimal($('day-preco').value);
 
-    if (currentReportExpenses.length === 0) {
-        container.innerHTML = '<p class="text-center" style="font-size:0.9rem; color:var(--text-secondary);">Nenhum gasto extra neste período.</p>';
-    } else {
-        currentReportExpenses.forEach(exp => {
-            const div = document.createElement('div');
-            div.className = 'd-flex justify-between align-center';
-            div.style.background = 'rgba(255,255,255,0.03)';
-            div.style.padding = '8px 12px';
-            div.style.borderRadius = '6px';
-            div.style.fontSize = '0.9rem';
-            div.innerHTML = `
-                <span>${exp.desc} <small style="color:var(--text-secondary)">(${exp.date})</small></span>
-                <span style="font-weight:600; color:var(--accent-danger)">R$ ${exp.val.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
-            `;
-            container.appendChild(div);
-        });
+    if (!day) {
+        if (!Object.keys(earnings).length && !km && !consumo && !preco) return;
+        day = getOrCreateDay(key);
     }
+    day.earnings = earnings;
+    day.km = km;
+    if (consumo > 0) day.consumoL = consumo; else delete day.consumoL;
+    if (preco > 0) day.precoL = preco; else delete day.precoL;
+    pruneDay(day);
 
-    modal.style.display = 'flex';
+    markChanged();
+    refreshDashboard();
 }
 
-function renderReports(tabId) {
-    const listTitle = document.getElementById('report-list-title');
-    const content = document.getElementById('report-content');
-    
-    // Obter plataformas ativas do perfil do usuário para o gráfico
-    const platforms = appData.settings.plataformas || [];
-    
-    // Resetar Estatísticas do período
-    document.getElementById('rep-stat-km').textContent = '0.0 km';
-    document.getElementById('rep-stat-consumo').textContent = '0.0 km/L';
-    document.getElementById('rep-stat-combustivel').textContent = 'R$ 0,00';
-    document.getElementById('rep-stat-custo-km').textContent = 'R$ 0,00';
-    document.getElementById('rep-stat-gastos').textContent = 'R$ 0,00 ➔';
-    
-    currentReportExpenses = [];
+function renderHero(r) {
+    const hero = $('hero');
+    const word = { day: 'do dia', week: 'da semana', month: 'do mês' }[state.scope];
+    const tip = $('hero-tip');
+    const fix = $('hero-fix');
+    tip.hidden = true;
+    fix.hidden = true;
 
-    // Por padrão o gráfico vem zerado (valores zerados por plataforma)
-    drawReportChart(platforms, {});
-
-    if (!appData.history || appData.history.length === 0) {
-        content.innerHTML = '<p class="text-center" style="padding:20px 0;">Nenhum dado registrado ainda.</p>';
-        listTitle.textContent = "Nenhum dado";
+    if (r.error) {
+        hero.dataset.state = 'error';
+        $('hero-label').textContent = 'Revise suas metas';
+        $('hero-value').textContent = 'Sem lucro por km';
+        $('hero-sub').textContent = r.error;
+        $('hero-badge').textContent = '—';
+        $('hero-progress').style.width = '0%';
+        $('hero-net').textContent = brl(r.summary.net);
+        $('hero-target').textContent = '—';
+        fix.hidden = false;
         return;
     }
 
-    let itemsToRender = []; // Dias, semanas ou meses para a lista do período
+    const pct = Math.round(r.progress * 100);
+    $('hero-badge').textContent = `${pct}%`;
+    $('hero-progress').style.width = `${pct}%`;
+    $('hero-progressbar').setAttribute('aria-valuenow', pct);
+    $('hero-net').textContent = brl(r.summary.net);
+    $('hero-target').textContent = brl(r.meta);
 
-    if (tabId === 'tab-day') {
-        listTitle.textContent = "Lançamentos de Dias Recentes";
-        itemsToRender = [...appData.history].sort((a,b) => new Date(b.date) - new Date(a.date));
-        
-        let html = '';
-        itemsToRender.forEach(h => {
-            let bruto = 0;
-            for(let k in h.earnings) bruto += (parseFloat(h.earnings[k])||0);
-            
-            // Calcular líquido
-            const km = parseFloat(h.km) || 0;
-            const consumo = parseFloat(h.consumoL) || appData.settings.mediaConsumoL;
-            const precoL = parseFloat(h.precoL) || appData.settings.mediaPrecoCombustivel;
-            const custoComb = (km / consumo) * precoL;
-            const gastosExtras = parseFloat(h.expenses) || 0;
-            const liquido = bruto - custoComb - gastosExtras;
-
-            // Formatação do dia
-            const parts = h.date.split('-');
-            const formattedDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
-
-            html += `
-                <div class="report-item-row" data-date="${h.date}" style="border-bottom: 1px solid var(--border-color); padding: 12px 6px; cursor:pointer; transition:background 0.2s;">
-                    <div class="d-flex justify-between">
-                        <strong>${formattedDate}</strong>
-                        <div>
-                            <span style="color:var(--text-primary); font-weight:bold; margin-right:12px;">Bruto: R$ ${bruto.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
-                            <span style="color:var(--accent-secondary); font-weight:bold;">Líq: R$ ${liquido.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-        content.innerHTML = html;
-
-        // Ao clicar no item, preenche as estatísticas e gráfico
-        document.querySelectorAll('.report-item-row').forEach(row => {
-            row.onclick = () => {
-                document.querySelectorAll('.report-item-row').forEach(r => r.style.background = 'none');
-                row.style.background = 'rgba(59, 130, 246, 0.15)';
-                const dateStr = row.dataset.date;
-                const found = appData.history.find(h => h.date === dateStr);
-                if (found) {
-                    processPeriodData([found]);
-                }
-            };
-        });
-
-    } 
-    else if (tabId === 'tab-week') {
-        listTitle.textContent = "Lançamentos de Semanas";
-        // Agrupar histórico por semanas
-        const weeksMap = {};
-        appData.history.forEach(h => {
-            const dateObj = new Date(h.date + 'T12:00:00');
-            const { monday, sunday } = getWeekStartEndDates(dateObj);
-            const key = `${monday.toISOString().split('T')[0]}_${sunday.toISOString().split('T')[0]}`;
-            if (!weeksMap[key]) weeksMap[key] = [];
-            weeksMap[key].push(h);
-        });
-
-        const sortedWeekKeys = Object.keys(weeksMap).sort((a,b) => new Date(b.split('_')[0]) - new Date(a.split('_')[0]));
-        
-        let html = '';
-        sortedWeekKeys.forEach(key => {
-            const days = weeksMap[key];
-            let bruto = 0;
-            let liquido = 0;
-            
-            days.forEach(h => {
-                let dayBruto = 0;
-                for(let k in h.earnings) dayBruto += (parseFloat(h.earnings[k])||0);
-                bruto += dayBruto;
-
-                const km = parseFloat(h.km) || 0;
-                const consumo = parseFloat(h.consumoL) || appData.settings.mediaConsumoL;
-                const precoL = parseFloat(h.precoL) || appData.settings.mediaPrecoCombustivel;
-                const custoComb = (km / consumo) * precoL;
-                const gastosExtras = parseFloat(h.expenses) || 0;
-                liquido += (dayBruto - custoComb - gastosExtras);
-            });
-
-            const partsStart = key.split('_')[0].split('-');
-            const partsEnd = key.split('_')[1].split('-');
-            const formattedRange = `${partsStart[2]}/${partsStart[1]} a ${partsEnd[2]}/${partsEnd[1]}`;
-
-            html += `
-                <div class="report-item-row" data-week-key="${key}" style="border-bottom: 1px solid var(--border-color); padding: 12px 6px; cursor:pointer; transition:background 0.2s;">
-                    <div class="d-flex justify-between">
-                        <strong>Semana ${formattedRange}</strong>
-                        <div>
-                            <span style="color:var(--text-primary); font-weight:bold; margin-right:12px;">Bruto: R$ ${bruto.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
-                            <span style="color:var(--accent-secondary); font-weight:bold;">Líq: R$ ${liquido.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-        content.innerHTML = html;
-
-        document.querySelectorAll('.report-item-row').forEach(row => {
-            row.onclick = () => {
-                document.querySelectorAll('.report-item-row').forEach(r => r.style.background = 'none');
-                row.style.background = 'rgba(59, 130, 246, 0.15)';
-                const key = row.dataset.weekKey;
-                const days = weeksMap[key];
-                if (days) {
-                    processPeriodData(days);
-                }
-            };
-        });
-    } 
-    else if (tabId === 'tab-month') {
-        listTitle.textContent = "Lançamentos de Meses";
-        // Agrupar histórico por meses
-        const monthsMap = {};
-        appData.history.forEach(h => {
-            const parts = h.date.split('-');
-            const key = `${parts[0]}-${parts[1]}`; // YYYY-MM
-            if (!monthsMap[key]) monthsMap[key] = [];
-            monthsMap[key].push(h);
-        });
-
-        const sortedMonthKeys = Object.keys(monthsMap).sort((a,b) => new Date(b + '-01') - new Date(a + '-01'));
-
-        let html = '';
-        sortedMonthKeys.forEach(key => {
-            const days = monthsMap[key];
-            let bruto = 0;
-            let liquido = 0;
-            
-            days.forEach(h => {
-                let dayBruto = 0;
-                for(let k in h.earnings) dayBruto += (parseFloat(h.earnings[k])||0);
-                bruto += dayBruto;
-
-                const km = parseFloat(h.km) || 0;
-                const consumo = parseFloat(h.consumoL) || appData.settings.mediaConsumoL;
-                const precoL = parseFloat(h.precoL) || appData.settings.mediaPrecoCombustivel;
-                const custoComb = (km / consumo) * precoL;
-                const gastosExtras = parseFloat(h.expenses) || 0;
-                liquido += (dayBruto - custoComb - gastosExtras);
-            });
-
-            const parts = key.split('-');
-            const nameMonth = mesesAno[parseInt(parts[1], 10) - 1];
-
-            html += `
-                <div class="report-item-row" data-month-key="${key}" style="border-bottom: 1px solid var(--border-color); padding: 12px 6px; cursor:pointer; transition:background 0.2s;">
-                    <div class="d-flex justify-between">
-                        <strong>${nameMonth} / ${parts[0]}</strong>
-                        <div>
-                            <span style="color:var(--text-primary); font-weight:bold; margin-right:12px;">Bruto: R$ ${bruto.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
-                            <span style="color:var(--accent-secondary); font-weight:bold;">Líq: R$ ${liquido.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-        content.innerHTML = html;
-
-        document.querySelectorAll('.report-item-row').forEach(row => {
-            row.onclick = () => {
-                document.querySelectorAll('.report-item-row').forEach(r => r.style.background = 'none');
-                row.style.background = 'rgba(59, 130, 246, 0.15)';
-                const key = row.dataset.monthKey;
-                const days = monthsMap[key];
-                if (days) {
-                    processPeriodData(days);
-                }
-            };
-        });
-    } 
-    else if (tabId === 'tab-other') {
-        listTitle.textContent = "Filtrar período customizado";
-        content.innerHTML = '<p class="text-center" style="padding:20px 0;">Preencha a data início e fim acima e clique em Filtrar Período.</p>';
-        
-        const startVal = document.getElementById('report-start-date').value;
-        const endVal = document.getElementById('report-end-date').value;
-
-        if (startVal && endVal) {
-            const filteredDays = appData.history.filter(h => h.date >= startVal && h.date <= endVal);
-            if (filteredDays.length === 0) {
-                content.innerHTML = '<p class="text-center" style="padding:20px 0;">Nenhum dado encontrado no intervalo selecionado.</p>';
-                return;
-            }
-
-            listTitle.textContent = `Lançamentos de ${startVal.split('-')[2]}/${startVal.split('-')[1]} até ${endVal.split('-')[2]}/${endVal.split('-')[1]}`;
-            
-            // Processa de imediato os dados do período customizado filtrado
-            processPeriodData(filteredDays);
-
-            let html = '';
-            filteredDays.sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(h => {
-                let bruto = 0;
-                for(let k in h.earnings) bruto += (parseFloat(h.earnings[k])||0);
-                
-                const km = parseFloat(h.km) || 0;
-                const consumo = parseFloat(h.consumoL) || appData.settings.mediaConsumoL;
-                const precoL = parseFloat(h.precoL) || appData.settings.mediaPrecoCombustivel;
-                const custoComb = (km / consumo) * precoL;
-                const gastosExtras = parseFloat(h.expenses) || 0;
-                const liquido = bruto - custoComb - gastosExtras;
-
-                const parts = h.date.split('-');
-                const formattedDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
-
-                html += `
-                    <div style="border-bottom: 1px solid var(--border-color); padding: 12px 6px;">
-                        <div class="d-flex justify-between">
-                            <strong>${formattedDate}</strong>
-                            <div>
-                                <span style="color:var(--text-primary); font-weight:bold; margin-right:12px;">Bruto: R$ ${bruto.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
-                                <span style="color:var(--accent-secondary); font-weight:bold;">Líq: R$ ${liquido.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-            content.innerHTML = html;
+    if (r.metaAlcancada) {
+        hero.dataset.state = 'done';
+        $('hero-label').textContent = `Meta ${word} batida`;
+        $('hero-value').textContent = `+ ${brl(r.excedente)}`;
+        $('hero-sub').textContent = 'acima da meta líquida';
+        if (r.status === 'current') {
+            tip.hidden = false;
+            tip.textContent = 'Tudo o que entrar agora é lucro extra. Uma folga também vale.';
+        }
+    } else if (r.status === 'past') {
+        hero.dataset.state = 'missed';
+        $('hero-label').textContent = `Faltou para a meta ${word}`;
+        $('hero-value').textContent = brl(r.faltaLiquido);
+        $('hero-sub').textContent = 'de lucro líquido';
+    } else {
+        hero.dataset.state = 'progress';
+        const label = { day: 'Falta faturar no dia', week: 'Falta faturar na semana', month: 'Falta faturar no mês' }[state.scope];
+        $('hero-label').textContent = label;
+        $('hero-value').textContent = brl(r.brutoFaltante);
+        $('hero-sub').textContent = `bruto · cerca de ${fmt(r.kmFaltante, 0)} km a mais · ${brl(r.faltaLiquido)} líquido`;
+        if (state.scope !== 'day' && r.diasRestantes > 0) {
+            tip.hidden = false;
+            tip.textContent = r.diasRestantes === 1
+                ? `Último dia de trabalho do período: ${brl(r.brutoFaltante)} brutos.`
+                : `Sugestão: ${brl(r.brutoPorDia)} por dia (≈ ${fmt(r.kmPorDia, 0)} km) nos próximos ${r.diasRestantes} dias de trabalho.`;
         }
     }
 }
 
-// Processa as estatísticas e os valores por app de um conjunto de dias selecionado
-function processPeriodData(daysList) {
-    const platforms = appData.settings.plataformas || [];
-    const appTotals = {};
-    platforms.forEach(p => appTotals[p] = 0);
-
-    let totalKm = 0;
-    let sumConsumo = 0;
-    let sumPrecoL = 0;
-    let countConsumo = 0;
-    let countPrecoL = 0;
-    let totalGastosExtras = 0;
-    
-    currentReportExpenses = [];
-
-    daysList.forEach(day => {
-        // Ganhos
-        for (let p in day.earnings) {
-            if (appTotals[p] !== undefined) {
-                appTotals[p] += parseFloat(day.earnings[p]) || 0;
-            }
-        }
-
-        // Km Rodado
-        totalKm += parseFloat(day.km) || 0;
-
-        // Consumo Automóvel
-        if (day.consumoL) {
-            sumConsumo += parseFloat(day.consumoL);
-            countConsumo++;
-        }
-        
-        // Preço Combustível
-        if (day.precoL) {
-            sumPrecoL += parseFloat(day.precoL);
-            countPrecoL++;
-        }
-
-        // Gastos Extras
-        const dayExpenseVal = parseFloat(day.expenses) || 0;
-        totalGastosExtras += dayExpenseVal;
-
-        if (Array.isArray(day.detailedExpenses)) {
-            day.detailedExpenses.forEach(exp => {
-                currentReportExpenses.push({ desc: exp.desc, val: exp.val, date: day.date.split('-')[2] + '/' + day.date.split('-')[1] });
-            });
-        } else if (dayExpenseVal > 0) {
-            currentReportExpenses.push({ desc: 'Gastos Gerais', val: dayExpenseVal, date: day.date.split('-')[2] + '/' + day.date.split('-')[1] });
-        }
-    });
-
-    const mediaConsumo = countConsumo > 0 ? (sumConsumo / countConsumo) : appData.settings.mediaConsumoL;
-    const mediaPrecoL = countPrecoL > 0 ? (sumPrecoL / countPrecoL) : appData.settings.mediaPrecoCombustivel;
-    const custoCombustivelPorKm = mediaPrecoL / mediaConsumo;
-
-    // Atualizar UI das Estatísticas
-    document.getElementById('rep-stat-km').textContent = `${totalKm.toFixed(1)} km`;
-    document.getElementById('rep-stat-consumo').textContent = `${mediaConsumo.toFixed(1)} km/L`;
-    document.getElementById('rep-stat-combustivel').textContent = `R$ ${mediaPrecoL.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
-    document.getElementById('rep-stat-custo-km').textContent = `R$ ${custoCombustivelPorKm.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
-    document.getElementById('rep-stat-gastos').textContent = `R$ ${totalGastosExtras.toLocaleString('pt-BR', {minimumFractionDigits:2})} ➔`;
-
-    // Desenhar Gráfico
-    drawReportChart(platforms, appTotals);
+function renderStats(sum) {
+    $('stat-gross').textContent = brl(sum.gross);
+    $('stat-fuel').textContent = brl(sum.fuel);
+    $('stat-fuel-sub').textContent = sum.km > 0 ? `${fmt(sum.liters, 1)} L estimados` : 'estimado';
+    $('stat-exp').textContent = brl(sum.expenses);
+    $('stat-km').textContent = `${fmt(sum.km, sum.km % 1 ? 1 : 0)} km`;
+    $('stat-km-sub').textContent = sum.km > 0 && sum.gross > 0 ? `${brl(sum.grossPerKm)}/km` : '';
+    $('day-gross-total').textContent = brl(sum.gross);
 }
 
-// Desenha o gráfico de barras
-function drawReportChart(platforms, appTotals) {
-    const container = document.getElementById('report-chart-container');
-    container.innerHTML = '';
+function renderExpenses(sum) {
+    const list = $('expense-list');
+    const isDay = state.scope === 'day';
+    $('expense-total').textContent = sum.expenses > 0 ? brl(sum.expenses) : '';
 
-    // Encontrar maior valor para normalizar altura das torres (máximo 100%)
-    let maxVal = 0;
-    platforms.forEach(p => {
-        const val = appTotals[p] || 0;
-        if (val > maxVal) maxVal = val;
-    });
-
-    if (maxVal === 0) maxVal = 100; // Evita divisão por zero
-
-    platforms.forEach(p => {
-        const val = appTotals[p] || 0;
-        const pctHeight = (val / maxVal) * 100;
-
-        const colDiv = document.createElement('div');
-        colDiv.style.display = 'flex';
-        colDiv.style.flexDirection = 'column';
-        colDiv.style.alignItems = 'center';
-        colDiv.style.width = '14%';
-        colDiv.style.height = '100%';
-        colDiv.style.justifyContent = 'flex-end';
-
-        colDiv.innerHTML = `
-            <span style="font-size:0.75rem; font-weight:bold; color:var(--accent-secondary); margin-bottom:4px; white-space:nowrap;">R$ ${val.toFixed(0)}</span>
-            <div style="width:70%; height:${pctHeight.toFixed(0)}%; background:linear-gradient(180deg, var(--accent-primary) 0%, rgba(59,130,246,0.3) 100%); border-radius:6px 6px 0 0; transition:height 0.4s ease; box-shadow: var(--glow-primary);"></div>
-            <span style="font-size:0.7rem; color:var(--text-secondary); margin-top:8px; text-align:center; overflow:hidden; text-overflow:ellipsis; width:100%; white-space:nowrap;" title="${p}">${p.split(' ')[0]}</span>
-        `;
-        container.appendChild(colDiv);
-    });
-}
-
-// --- PROFILE SCREEN ---
-document.getElementById('btn-reconfig').addEventListener('click', () => {
-    isDashboardInitialized = false; 
-    renderSetup();
-    showScreen('setup-screen');
-});
-
-document.getElementById('btn-wipe-data').addEventListener('click', async () => {
-    if (confirm("TEM CERTEZA? Isso apagará todos os seus dados do Google Drive permanentemente.")) {
-        showScreen('loading-screen');
-        try {
-            await deleteData(fileId);
-            fileId = null;
-            appData = null;
-            isDashboardInitialized = false;
-            logout();
-            showScreen('login-screen');
-        } catch(e) {
-            alert("Erro ao apagar os dados.");
-            showScreen('profile-screen');
-        }
+    if (isDay) {
+        const items = findDay(dayKey())?.detailedExpenses || [];
+        list.innerHTML = items.length
+            ? items.map((e, i) => `
+                <li class="list-item">
+                    <button type="button" class="item-main" data-edit="${i}">
+                        <span class="item-title">${esc(e.desc)}</span>
+                        <span class="item-sub">Toque para editar</span>
+                    </button>
+                    <span class="item-value neg">${brl(L.num(e.val))}</span>
+                    <button type="button" class="icon-btn" data-del="${i}" aria-label="Remover ${esc(e.desc)}">${ICON_TRASH}</button>
+                </li>`).join('')
+            : '<li class="empty">Nenhum gasto neste dia.</li>';
+    } else {
+        list.innerHTML = sum.expenseItems.length
+            ? sum.expenseItems.map(e => {
+                const d = L.parseDateKey(e.date);
+                return `
+                <li class="list-item">
+                    <div class="item-main">
+                        <span class="item-title">${esc(e.desc)}</span>
+                        <span class="item-sub">${WEEKDAYS_SHORT[d.getDay()]}, ${shortDate(d)}</span>
+                    </div>
+                    <span class="item-value neg">${brl(e.val)}</span>
+                </li>`;
+            }).join('')
+            : `<li class="empty">Nenhum gasto ${state.scope === 'week' ? 'nesta semana' : 'neste mês'}.</li>`;
     }
-});
+}
 
-document.getElementById('btn-logout').addEventListener('click', () => {
+// ── Gastos ──
+function openExpenseDialog(index = null) {
+    const day = findDay(dayKey());
+    const item = index !== null ? day?.detailedExpenses?.[index] : null;
+    state.editingExpense = item ? index : null;
+    $('expense-dialog-title').textContent = item ? 'Editar gasto' : 'Novo gasto';
+    $('expense-desc').value = item?.desc || '';
+    $('expense-val').value = item ? moneyInput(L.num(item.val)) : '';
+    $('expense-suggestions').innerHTML = EXPENSE_SUGGESTIONS.map(s => `<button type="button" class="chip" data-suggest="${esc(s)}">${esc(s)}</button>`).join('');
+    $('expense-dialog').showModal();
+    if (!item) setTimeout(() => $('expense-desc').focus(), 50);
+}
+
+function saveExpense(e) {
+    e.preventDefault();
+    const desc = $('expense-desc').value.trim();
+    const val = parseDecimal($('expense-val').value);
+    if (!desc) { toast('Informe a descrição do gasto.', { type: 'error' }); $('expense-desc').focus(); return; }
+    if (!(val > 0)) { toast('Informe um valor maior que zero.', { type: 'error' }); $('expense-val').focus(); return; }
+
+    const day = getOrCreateDay(dayKey());
+    if (state.editingExpense !== null && day.detailedExpenses[state.editingExpense]) {
+        day.detailedExpenses[state.editingExpense] = { desc, val };
+    } else {
+        day.detailedExpenses.push({ desc, val });
+    }
+    day.expenses = L.dayExpenses(day);
+    $('expense-dialog').close();
+    markChanged(600);
+    refreshDashboard();
+}
+
+function removeExpense(index) {
+    const key = dayKey();
+    const day = findDay(key);
+    if (!day?.detailedExpenses?.[index]) return;
+    const [removed] = day.detailedExpenses.splice(index, 1);
+    day.expenses = L.dayExpenses(day);
+    pruneDay(day);
+    markChanged();
+    refreshDashboard();
+
+    toast(`"${removed.desc}" removido.`, {
+        action: 'Desfazer',
+        onAction: () => {
+            const d = getOrCreateDay(key);
+            d.detailedExpenses.splice(Math.min(index, d.detailedExpenses.length), 0, removed);
+            d.expenses = L.dayExpenses(d);
+            markChanged();
+            refreshDashboard();
+        }
+    });
+}
+
+// ═══════════════════════ Relatórios ═══════════════════════
+function buildReportGroups(tab) {
+    const history = state.data.history;
+    const groups = new Map();
+    const add = (key, make, day) => {
+        if (!groups.has(key)) groups.set(key, { key, ...make(), days: [] });
+        groups.get(key).days.push(day);
+    };
+
+    if (tab === 'range') {
+        if (!state.range) return [];
+        const days = L.filterRange(history, state.range.start, state.range.end);
+        const s = L.parseDateKey(state.range.start), e = L.parseDateKey(state.range.end);
+        return days.length ? [{ key: 'range', label: `${shortDate(s)}/${s.getFullYear()} a ${shortDate(e)}/${e.getFullYear()}`, days }] : [];
+    }
+
+    history.forEach(day => {
+        const d = L.parseDateKey(day.date);
+        if (tab === 'days') {
+            add(day.date, () => ({ label: `${WEEKDAYS_SHORT[d.getDay()]}, ${shortDate(d)}`, sub: String(d.getFullYear()) }), day);
+        } else if (tab === 'weeks') {
+            const { start, end } = L.getWeekRange(d);
+            add(L.toDateKey(start), () => ({ label: `${shortDate(start)} a ${shortDate(end)}`, sub: String(end.getFullYear()) }), day);
+        } else {
+            const key = day.date.slice(0, 7);
+            add(key, () => ({ label: `${MONTHS[d.getMonth()]} ${d.getFullYear()}` }), day);
+        }
+    });
+
+    return [...groups.values()].sort((a, b) => b.key.localeCompare(a.key));
+}
+
+function renderReports() {
+    if (!state.data) return;
+    const tab = state.reportTab;
+    document.querySelectorAll('#report-seg .seg-btn').forEach(b => {
+        const active = b.dataset.tab === tab;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', active);
+    });
+    $('range-form').hidden = tab !== 'range';
+
+    if (tab === 'range' && !state.range) {
+        const today = todayDate();
+        state.range = { start: L.toDateKey(new Date(today.getFullYear(), today.getMonth(), 1)), end: L.toDateKey(today) };
+    }
+    if (tab === 'range') {
+        $('range-start').value = state.range.start;
+        $('range-end').value = state.range.end;
+    }
+
+    const groups = buildReportGroups(tab);
+    const hasData = groups.length > 0;
+    $('report-empty').hidden = hasData;
+    $('report-body').hidden = !hasData;
+    if (!hasData) {
+        $('report-empty').querySelector('p').textContent = tab === 'range' ? 'Nenhum lançamento nesse período.' : 'Nenhum lançamento por aqui ainda.';
+        return;
+    }
+
+    const s = settings();
+    let selected = groups.find(g => g.key === state.reportKey) || groups[0];
+    state.reportKey = selected.key;
+
+    if (tab === 'range') {
+        // Na aba período, a lista mostra os dias do intervalo filtrado
+        $('report-list-title').textContent = `Dias no período (${selected.days.length})`;
+        $('report-list').innerHTML = [...selected.days].sort((a, b) => b.date.localeCompare(a.date)).map(day => {
+            const d = L.parseDateKey(day.date);
+            return reportRow({ label: `${WEEKDAYS_SHORT[d.getDay()]}, ${shortDate(d)}`, sub: String(d.getFullYear()) }, L.summarize([day], s), false);
+        }).join('');
+    } else {
+        $('report-list-title').textContent = { days: 'Dias', weeks: 'Semanas', months: 'Meses' }[tab];
+        $('report-list').innerHTML = groups.map(g => reportRow(g, L.summarize(g.days, s), true, g.key === selected.key)).join('');
+    }
+
+    renderReportSummary(selected);
+}
+
+function reportRow(g, sum, selectable, isSelected = false) {
+    const tag = selectable ? 'button' : 'div';
+    return `
+        <li>
+            <${tag} ${selectable ? `type="button" data-group="${esc(g.key)}" aria-pressed="${isSelected}"` : ''} class="list-item ${isSelected ? 'selected' : ''}">
+                <span class="item-main">
+                    <span class="item-title">${esc(g.label)}</span>
+                    <span class="item-sub">${g.sub ? esc(g.sub) + ' · ' : ''}${sum.days > 1 ? `${sum.workedDays} ${sum.workedDays === 1 ? 'dia' : 'dias'} · ` : ''}${fmt(sum.km, 0)} km</span>
+                </span>
+                <span class="item-value ${sum.net < 0 ? 'neg' : 'pos'}">${brl(sum.net)}<small>bruto ${brl(sum.gross)}</small></span>
+            </${tag}>
+        </li>`;
+}
+
+function renderReportSummary(group) {
+    const s = settings();
+    const sum = L.summarize(group.days, s);
+    state.reportExpenses = sum.expenseItems;
+
+    const kind = { days: '', weeks: 'Semana · ', months: '', range: 'Período · ' }[state.reportTab];
+    $('rep-period').textContent = `${kind}${group.label}`;
+    $('rep-net').textContent = brl(sum.net);
+    $('rep-net').className = `hero-value ${sum.net < 0 ? 'neg' : ''}`;
+    $('rep-net-sub').textContent = `lucro líquido · ${sum.workedDays} ${sum.workedDays === 1 ? 'dia trabalhado' : 'dias trabalhados'}`;
+    $('rep-gross').textContent = brl(sum.gross);
+    $('rep-fuel').textContent = brl(sum.fuel);
+    $('rep-exp').textContent = brl(sum.expenses);
+    $('rep-km').textContent = `${fmt(sum.km, 0)} km`;
+    $('rep-gpk').textContent = sum.km > 0 ? brl(sum.grossPerKm) : '—';
+    $('rep-cpk').textContent = brl(sum.costPerKm);
+    $('rep-consumo').textContent = `${fmt(sum.avgConsumo)} km/L`;
+    $('rep-preco').textContent = brl(sum.avgPreco);
+
+    // Gráfico por aplicativo (inclui apps antigos que existam no histórico)
+    const names = [...new Set([...s.plataformas, ...Object.keys(sum.byPlatform)])];
+    const rows = names.map(p => ({ p, v: sum.byPlatform[p] || 0 })).sort((a, b) => b.v - a.v);
+    const max = Math.max(...rows.map(r => r.v), 0);
+    $('report-chart').innerHTML = max === 0
+        ? '<p class="muted small">Sem ganhos registrados neste período.</p>'
+        : rows.map(({ p, v }) => `
+            <div class="hbar">
+                <div class="hbar-head"><span>${esc(p)}</span><span>${brl(v)}<small>${sum.gross > 0 ? Math.round(v / sum.gross * 100) : 0}%</small></span></div>
+                <div class="hbar-track"><div class="hbar-fill" style="width:${(v / max * 100).toFixed(1)}%; --c:${platformColor(p)}"></div></div>
+            </div>`).join('');
+}
+
+function openReportExpenses() {
+    const items = state.reportExpenses || [];
+    $('report-expenses-list').innerHTML = items.length
+        ? items.map(e => {
+            const d = L.parseDateKey(e.date);
+            return `<li class="list-item"><div class="item-main"><span class="item-title">${esc(e.desc)}</span><span class="item-sub">${WEEKDAYS_SHORT[d.getDay()]}, ${shortDate(d)}</span></div><span class="item-value neg">${brl(e.val)}</span></li>`;
+        }).join('')
+        : '<li class="empty">Nenhum gasto extra neste período.</li>';
+    $('report-expenses-dialog').showModal();
+}
+
+// ═══════════════════════ Ajustes ═══════════════════════
+function renderProfile() {
+    if (!state.data) return;
+    const s = settings();
+    const lucroKm = L.num(s.mediaPagamentoKm) - L.num(s.mediaPrecoCombustivel) / L.num(s.mediaConsumoL);
+    const rows = [
+        ['Meta líquida mensal', brl(L.num(s.metaLiquidaMensal))],
+        ['Dias de trabalho', `${s.diasTrabalhoMes} dias`],
+        ['Meta líquida por dia', brl(L.num(s.metaLiquidaMensal) / L.num(s.diasTrabalhoMes))],
+        ['Ganho médio por km', brl(L.num(s.mediaPagamentoKm))],
+        ['Consumo médio', `${fmt(L.num(s.mediaConsumoL))} km/L`],
+        ['Preço do litro', brl(L.num(s.mediaPrecoCombustivel))],
+        ['Lucro estimado por km', brl(lucroKm)]
+    ];
+    $('profile-settings').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+    $('profile-platforms').innerHTML = s.plataformas.map(p => `<span class="chip"><span class="plat-dot" style="--c:${platformColor(p)}"></span>${esc(p)}</span>`).join('');
+}
+
+function exportBackup() {
+    const blob = new Blob([JSON.stringify(state.data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `napista-backup-${L.toDateKey(new Date())}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function handleLogout() {
+    if (hasUnsaved()) {
+        const ok = await confirmDialog({
+            title: 'Sair sem salvar?',
+            message: 'Algumas alterações ainda não foram enviadas ao Google Drive e serão perdidas.',
+            confirmLabel: 'Sair mesmo assim',
+            danger: true
+        });
+        if (!ok) return;
+    }
     logout();
-    appData = null;
-    fileId = null;
-    isDashboardInitialized = false;
+    clearPending();
+    resetSync();
+    state.data = null;
+    state.fileId = null;
     showScreen('login-screen');
-});
+}
+
+async function handleWipe() {
+    const ok = await confirmDialog({
+        title: 'Apagar todos os dados?',
+        message: 'Suas metas e todo o histórico serão apagados do Google Drive permanentemente. Considere baixar um backup antes.',
+        confirmLabel: 'Apagar tudo',
+        danger: true
+    });
+    if (!ok) return;
+
+    showLoading('Apagando dados…');
+    try {
+        clearTimeout(saveTimer);
+        if (inflight) await inflight;
+        await deleteData(state.fileId);
+        clearPending();
+        resetSync();
+        state.fileId = null;
+        state.data = L.createDefaultData();
+        state.reportKey = null;
+        toast('Dados apagados. Vamos configurar do zero.');
+        openSetup();
+    } catch (e) {
+        console.error(e);
+        toast('Não foi possível apagar os dados. Tente novamente.', { type: 'error' });
+        showScreen('profile-screen');
+    }
+}
+
+// ═══════════════════════ Eventos (registrados uma única vez) ═══════════════════════
+function bindEvents() {
+    // Máscaras e lançamentos do dia (delegação: funciona para inputs criados dinamicamente)
+    document.addEventListener('input', (e) => {
+        const t = e.target;
+        if (t.classList.contains('money')) maskMoney(t);
+        else if (t.classList.contains('decimal')) maskDecimal(t);
+        else if (t.classList.contains('integer')) t.value = t.value.replace(/\D/g, '');
+
+        if (t.classList.contains('day-input')) commitDayForm();
+        if (t.closest('#setup-form')) updateSetupPreview();
+    });
+
+    $('btn-login').addEventListener('click', handleLogin);
+
+    // Setup
+    $('setup-form').addEventListener('submit', saveSetup);
+    $('btn-cancel-setup').addEventListener('click', () => showScreen('profile-screen'));
+    $('btn-add-app').addEventListener('click', addCustomPlatform);
+    $('setup-other-app').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); addCustomPlatform(); }
+    });
+    $('setup-platforms').addEventListener('click', (e) => {
+        const chip = e.target.closest('[data-platform]');
+        if (!chip) return;
+        const p = chip.dataset.platform;
+        const i = state.setupPlatforms.indexOf(p);
+        if (i === -1) state.setupPlatforms.push(p); else state.setupPlatforms.splice(i, 1);
+        chip.setAttribute('aria-pressed', i === -1);
+    });
+
+    // Navegação inferior
+    document.querySelectorAll('.nav-item').forEach(btn => {
+        btn.addEventListener('click', () => showScreen(btn.dataset.target));
+    });
+
+    // Dashboard
+    document.querySelectorAll('#scope-seg .seg-btn').forEach(btn => {
+        btn.addEventListener('click', () => setScope(btn.dataset.scope));
+    });
+    $('btn-prev-date').addEventListener('click', () => navigateDate(-1));
+    $('btn-next-date').addEventListener('click', () => navigateDate(1));
+    $('btn-today').addEventListener('click', () => setAnchor(todayDate()));
+    $('btn-date-picker').addEventListener('click', (e) => {
+        if (e.target.id !== 'date-picker') openDatePicker();
+    });
+    $('date-picker').addEventListener('change', (e) => {
+        if (e.target.value) setAnchor(L.parseDateKey(e.target.value));
+    });
+    $('hero-fix').addEventListener('click', openSetup);
+
+    $('btn-add-expense').addEventListener('click', () => openExpenseDialog());
+    $('expense-list').addEventListener('click', (e) => {
+        const edit = e.target.closest('[data-edit]');
+        const del = e.target.closest('[data-del]');
+        if (edit) openExpenseDialog(Number(edit.dataset.edit));
+        if (del) removeExpense(Number(del.dataset.del));
+    });
+    $('expense-form').addEventListener('submit', saveExpense);
+    $('expense-suggestions').addEventListener('click', (e) => {
+        const chip = e.target.closest('[data-suggest]');
+        if (!chip) return;
+        $('expense-desc').value = chip.dataset.suggest;
+        $('expense-val').focus();
+    });
+
+    // Relatórios
+    document.querySelectorAll('#report-seg .seg-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            state.reportTab = btn.dataset.tab;
+            state.reportKey = null;
+            renderReports();
+        });
+    });
+    $('report-list').addEventListener('click', (e) => {
+        const row = e.target.closest('[data-group]');
+        if (!row) return;
+        state.reportKey = row.dataset.group;
+        renderReports();
+        $('rep-period').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    $('range-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        let start = $('range-start').value;
+        let end = $('range-end').value;
+        if (!start || !end) { toast('Escolha as duas datas.', { type: 'error' }); return; }
+        if (start > end) [start, end] = [end, start];
+        state.range = { start, end };
+        renderReports();
+    });
+    $('rep-exp-btn').addEventListener('click', openReportExpenses);
+
+    // Ajustes
+    $('btn-edit-goals').addEventListener('click', openSetup);
+    $('btn-export').addEventListener('click', exportBackup);
+    $('btn-logout').addEventListener('click', handleLogout);
+    $('btn-wipe').addEventListener('click', handleWipe);
+
+    // Diálogos: botões [data-close] e clique fora
+    document.querySelectorAll('dialog').forEach(dlg => {
+        dlg.addEventListener('click', (e) => {
+            if (e.target === dlg) dlg.close();
+            if (e.target.closest('[data-close]')) dlg.close();
+        });
+    });
+
+    // Sincronização
+    $('sync-pill').addEventListener('click', () => {
+        if (hasUnsaved()) flushSave(true); // dentro do clique: permite renovar o login se preciso
+        else toast(hasValidToken() ? 'Tudo salvo no seu Google Drive.' : 'Tudo salvo.');
+    });
+    window.addEventListener('online', () => { if (hasUnsaved()) flushSave(); });
+    window.addEventListener('offline', () => { if (hasUnsaved()) setSync('offline'); });
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden' && hasUnsaved() && hasValidToken()) flushSave();
+        // ao voltar ao app num novo dia, atualiza o "hoje"
+        if (document.visibilityState === 'visible' && state.data && $('dashboard-screen').classList.contains('active')) renderDateNav();
+    });
+}
+
+bindEvents();
+boot();

@@ -1,100 +1,66 @@
-import { getAccessToken } from './auth.js';
+// Persistência no Google Drive (pasta privada do app: appDataFolder).
+import { getToken, invalidateToken } from './auth.js';
 
 const FILENAME = 'napista_data.json';
+const API = 'https://www.googleapis.com/drive/v3/files';
+const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
 
-// Helper to make API calls to Drive
-async function driveApiCall(url, method = 'GET', body = null, isMultipart = false, boundary = '') {
-    const headers = new Headers();
-    headers.append('Authorization', `Bearer ${getAccessToken()}`);
-    
-    if (isMultipart) {
-        headers.append('Content-Type', `multipart/related; boundary=${boundary}`);
-    } else if (body && method !== 'GET') {
-        headers.append('Content-Type', 'application/json');
-    }
-
-    const options = { method, headers };
-    if (body) options.body = body;
-
-    const response = await fetch(url, options);
-    if (!response.ok) {
-        if (response.status === 401) {
-             console.error("Token expirado ou inválido.");
-             // Pode disparar um evento para refazer login aqui
-        }
-        throw new Error(`Drive API Error: ${response.status} ${response.statusText}`);
-    }
-    
-    // 204 No Content for delete
-    if (response.status === 204) return null;
-    
-    return response.json();
-}
-
-// Find file in appDataFolder
-export async function findDataFile() {
-    const query = encodeURIComponent(`name='${FILENAME}' and 'appDataFolder' in parents and trashed=false`);
-    const url = `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${query}&fields=files(id,name)`;
-    
-    const data = await driveApiCall(url);
-    if (data.files && data.files.length > 0) {
-        return data.files[0].id;
-    }
-    return null;
-}
-
-// Read JSON data from file ID
-export async function readData(fileId) {
-    const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-    const response = await fetch(url, {
-        headers: {
-            'Authorization': `Bearer ${getAccessToken()}`
-        }
+async function request(url, options = {}, retry = true) {
+    const token = await getToken();
+    const res = await fetch(url, {
+        ...options,
+        headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` }
     });
-    
-    if (!response.ok) throw new Error("Erro ao ler conteúdo do arquivo.");
-    return response.json();
-}
 
-// Create or update data file in appDataFolder
-export async function saveData(fileId, jsonData) {
-    const boundary = '-------314159265358979323846';
-    const delimiter = `\r\n--${boundary}\r\n`;
-    const close_delim = `\r\n--${boundary}--`;
-
-    const metadata = {
-        name: FILENAME,
-        mimeType: 'application/json',
-        parents: fileId ? undefined : ['appDataFolder']
-    };
-
-    const multipartRequestBody =
-        delimiter +
-        'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-        JSON.stringify(metadata) +
-        delimiter +
-        'Content-Type: application/json\r\n\r\n' +
-        JSON.stringify(jsonData) +
-        close_delim;
-
-    let url, method;
-    if (fileId) {
-        // Update
-        url = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`;
-        method = 'PATCH';
-    } else {
-        // Create
-        url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
-        method = 'POST';
+    if (res.status === 401 && retry) {
+        invalidateToken();
+        return request(url, options, false);
     }
-
-    const response = await driveApiCall(url, method, multipartRequestBody, true, boundary);
-    return response.id;
+    if (!res.ok) {
+        const err = new Error(`Drive API ${res.status} ${res.statusText}`);
+        err.status = res.status;
+        throw err;
+    }
+    return res;
 }
 
-// Delete file
+export async function findDataFile() {
+    const q = encodeURIComponent(`name='${FILENAME}' and 'appDataFolder' in parents and trashed=false`);
+    const url = `${API}?spaces=appDataFolder&q=${q}&orderBy=modifiedTime desc&fields=files(id,name,modifiedTime)`;
+    const data = await (await request(url)).json();
+    return data.files?.[0]?.id ?? null;
+}
+
+export async function readData(fileId) {
+    const res = await request(`${API}/${fileId}?alt=media`);
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+}
+
+export async function saveData(fileId, jsonData) {
+    const boundary = 'napista' + Math.random().toString(36).slice(2);
+    const metadata = fileId
+        ? { name: FILENAME, mimeType: 'application/json' }
+        : { name: FILENAME, mimeType: 'application/json', parents: ['appDataFolder'] };
+
+    const body =
+        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(jsonData)}\r\n` +
+        `--${boundary}--`;
+
+    const url = fileId
+        ? `${UPLOAD}/${fileId}?uploadType=multipart&fields=id`
+        : `${UPLOAD}?uploadType=multipart&fields=id`;
+
+    const res = await request(url, {
+        method: fileId ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+        body
+    });
+    return (await res.json()).id;
+}
+
 export async function deleteData(fileId) {
     if (!fileId) return;
-    const url = `https://www.googleapis.com/drive/v3/files/${fileId}`;
-    await driveApiCall(url, 'DELETE');
+    await request(`${API}/${fileId}`, { method: 'DELETE' });
 }
