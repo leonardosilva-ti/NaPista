@@ -1,6 +1,6 @@
 // Network-first para os arquivos do app: sempre pega a versão mais nova
 // quando há internet e usa o cache quando está offline.
-const CACHE_NAME = 'napista-v3';
+const CACHE_NAME = 'napista-v4';
 const ASSETS = [
     './',
     './index.html',
@@ -15,7 +15,7 @@ const ASSETS = [
 
 self.addEventListener('install', (event) => {
     event.waitUntil(
-        caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
+        caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting())
     );
 });
 
@@ -33,8 +33,10 @@ self.addEventListener('fetch', (event) => {
     const url = new URL(req.url);
     if (url.origin !== self.location.origin) return; // Google APIs, fontes etc.
 
+    // `no-cache` força conferir com o servidor: sem isso o navegador pode misturar
+    // arquivos novos e antigos (o GitHub Pages manda guardar cada um por 10 min).
     event.respondWith(
-        fetch(req)
+        fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' })
             .then((res) => {
                 if (res.ok) {
                     const copy = res.clone();

@@ -1,6 +1,6 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js';
-import * as L from './logic.js';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.1.1';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.1.1';
+import * as L from './logic.js?v=2.1.1';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -1433,13 +1433,13 @@ function bindEvents() {
         if (needsSync() || !hasValidToken()) syncNow(); // dentro do clique: permite renovar o login
         else toast('Tudo salvo no seu Google Drive.');
     });
-    // Token expirado com algo para sincronizar: aproveita o primeiro toque num
-    // botão para renovar (popup rápido que fecha sozinho), uma vez por abertura.
+    // Token expirado com algo para sincronizar: aproveita o primeiro toque no
+    // menu para renovar (popup rápido que fecha sozinho), uma vez por abertura.
     document.addEventListener('click', (e) => {
         if (autoRenewTried || !state.data || !isAuthReady() || hasValidToken() || !navigator.onLine) return;
         if (!hasUnsaved()) return;
-        const btn = e.target.closest('button');
-        if (!btn || btn.id === 'sync-pill' || btn.closest('dialog')) return;
+        // só no menu inferior, para não atrapalhar ações como "Criar meta"
+        if (!e.target.closest('.nav-item')) return;
         autoRenewTried = true;
         syncNow();
     }, true);
@@ -1455,6 +1455,10 @@ function bindEvents() {
         }
     });
 }
+
+// Erros inesperados aparecem na tela em vez de o botão simplesmente "não fazer nada"
+window.addEventListener('error', (e) => toast(`Erro inesperado: ${e.message || 'desconhecido'}. Recarregue o app.`, { type: 'error', duration: 8000 }));
+window.addEventListener('unhandledrejection', (e) => console.error('Promise rejeitada:', e.reason));
 
 bindEvents();
 boot();

@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=2.1.1">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -308,7 +308,7 @@
                     <button type="button" class="btn btn-danger-ghost" id="btn-wipe">Apagar todos os dados</button>
                 </div>
             </section>
-            <p class="version">Na Pista · v2.1</p>
+            <p class="version">Na Pista · v2.1.1</p>
         </section>
     </main>
 
@@ -413,11 +413,11 @@
         <button type="button" class="toast-action" id="toast-action" hidden></button>
     </div>
 
-    <script src="app.js" type="module"></script>
+    <script src="app.js?v=2.1.1" type="module"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js').catch(err => console.error('Service Worker:', err));
+                navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).catch(err => console.error('Service Worker:', err));
             });
         }
     </script>
