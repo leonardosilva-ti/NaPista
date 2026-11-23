@@ -11,7 +11,7 @@ export const defaultSettings = () => ({
     plataformas: []
 });
 
-export const createDefaultData = () => ({ settings: defaultSettings(), history: [] });
+export const createDefaultData = () => ({ settings: defaultSettings(), history: [], goals: [] });
 
 export const num = (v) => {
     const n = typeof v === 'number' ? v : parseFloat(v);
@@ -217,3 +217,88 @@ export function calculateTargets(scope, s, history, anchor, today = new Date()) 
         kmPorDia: diasRestantes > 0 ? kmFaltante / diasRestantes : 0
     };
 }
+
+
+// ── Metas com prazo (objetivos) ───────────────────────────────────────
+export const ALL_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
+
+/** Dias de trabalho sugeridos a partir dos dias/mês do perfil. */
+export function defaultWorkWeekdays(s) {
+    const dias = num(s?.diasTrabalhoMes);
+    if (dias >= 28) return [...ALL_WEEKDAYS];
+    if (dias > 0 && dias <= 22) return [1, 2, 3, 4, 5];
+    return [1, 2, 3, 4, 5, 6];
+}
+
+/** Conta os dias entre `from` e `to` (inclusive) que caem nos dias da semana escolhidos. */
+export function countWorkDays(from, to, weekdays = ALL_WEEKDAYS) {
+    const end = startOfDay(to);
+    let n = 0;
+    for (let d = startOfDay(from); d <= end; d = addDays(d, 1)) {
+        if (weekdays.includes(d.getDay())) n++;
+    }
+    return n;
+}
+
+/**
+ * Situação de uma meta líquida com data limite.
+ * O valor diário é calculado sem considerar o que já entrou hoje, para que
+ * o "por dia" fique estável ao longo do dia e "hojeFalta" diminua a cada lançamento.
+ */
+export function goalProgress(goal, s, history, today = new Date()) {
+    const t = startOfDay(today);
+    const todayKey = toDateKey(t);
+    const start = parseDateKey(goal.startDate);
+    const end = parseDateKey(goal.deadline);
+    const weekdays = Array.isArray(goal.weekdays) && goal.weekdays.length ? goal.weekdays : ALL_WEEKDAYS;
+    const meta = num(goal.amount);
+
+    const days = filterRange(history, goal.startDate, goal.deadline);
+    const summary = summarize(days, s);
+    const net = summary.net;
+    const falta = meta - net;
+    const status = falta <= 0 ? 'done'
+        : todayKey > goal.deadline ? 'expired'
+        : todayKey < goal.startDate ? 'scheduled'
+        : 'active';
+
+    const res = {
+        goal, status, meta, net, summary,
+        progress: meta > 0 ? Math.max(0, Math.min(1, net / meta)) : 0,
+        falta: Math.max(0, falta),
+        excedente: Math.max(0, -falta),
+        totalWorkDays: countWorkDays(start, end, weekdays),
+        calendarDaysLeft: Math.max(0, Math.round((end - t) / 86400000) + 1)
+    };
+    if (status === 'done' || status === 'expired') return res;
+
+    let diasRestantes, base, todayNet = 0, todayIsWork = false;
+    if (status === 'scheduled') {
+        diasRestantes = res.totalWorkDays;
+        base = falta;
+    } else {
+        const todayDay = days.find(d => d.date === todayKey);
+        todayNet = todayDay ? dayNet(todayDay, s) : 0;
+        todayIsWork = weekdays.includes(t.getDay()) || (todayDay ? isWorkedDay(todayDay) : false);
+        diasRestantes = countWorkDays(addDays(t, 1), end, weekdays) + (todayIsWork ? 1 : 0);
+        base = todayIsWork ? falta + todayNet : falta;
+    }
+    diasRestantes = Math.max(1, diasRestantes);
+
+    const porDia = Math.max(0, base) / diasRestantes;
+    const custoKm = num(s.mediaConsumoL) > 0 ? num(s.mediaPrecoCombustivel) / num(s.mediaConsumoL) : 0;
+    const lucroKm = num(s.mediaPagamentoKm) - custoKm;
+    const kmPorDia = lucroKm > 0 ? porDia / lucroKm : 0;
+
+    return {
+        ...res,
+        diasRestantes,
+        porDia,
+        todayIsWork,
+        todayNet,
+        hojeFalta: todayIsWork ? Math.max(0, porDia - todayNet) : 0,
+        kmPorDia,
+        brutoPorDia: lucroKm > 0 ? kmPorDia * num(s.mediaPagamentoKm) : 0
+    };
+}
+

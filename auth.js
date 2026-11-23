@@ -3,6 +3,7 @@
 const CLIENT_ID = '734048624553-99u245jqovloeg0uh18npqgr5ilevplj.apps.googleusercontent.com';
 const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
 const STORAGE_KEY = 'napista_auth';
+const HINT_KEY = 'napista_hint';
 const EXPIRY_MARGIN_MS = 60 * 1000;
 
 let tokenClient = null;
@@ -91,8 +92,26 @@ function requestToken(prompt = '') {
         const wrappedResolve = (t) => { clearTimeout(timer); resolve(t); };
         const wrappedReject = (e) => { clearTimeout(timer); reject(e); };
         pending = { resolve: wrappedResolve, reject: wrappedReject };
-        tokenClient.requestAccessToken({ prompt });
+        // Com o e-mail da conta, o Google renova sem pedir para escolher a conta
+        // (o popup abre e fecha sozinho quando a permissão já foi concedida).
+        const hint = getAccountHint();
+        tokenClient.requestAccessToken(hint ? { prompt, login_hint: hint } : { prompt });
     });
+}
+
+export function getAccountHint() {
+    try { return localStorage.getItem(HINT_KEY) || ''; } catch { return ''; }
+}
+
+export function setAccountHint(email) {
+    try {
+        if (email) localStorage.setItem(HINT_KEY, email);
+        else localStorage.removeItem(HINT_KEY);
+    } catch { /* ignora */ }
+}
+
+export function isAuthReady() {
+    return !!tokenClient;
 }
 
 export function hasValidToken() {
@@ -117,4 +136,5 @@ export function invalidateToken() {
 
 export function logout() {
     invalidateToken();
+    setAccountHint('');
 }

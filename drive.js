@@ -5,17 +5,16 @@ const FILENAME = 'napista_data.json';
 const API = 'https://www.googleapis.com/drive/v3/files';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
 
-async function request(url, options = {}, retry = true) {
+async function request(url, options = {}) {
     const token = await getToken();
     const res = await fetch(url, {
         ...options,
         headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` }
     });
 
-    if (res.status === 401 && retry) {
-        invalidateToken();
-        return request(url, options, false);
-    }
+    // Token rejeitado: descarta. Renovar exige um toque do usuário (popup),
+    // então quem chamou decide quando pedir de novo.
+    if (res.status === 401) invalidateToken();
     if (!res.ok) {
         const err = new Error(`Drive API ${res.status} ${res.statusText}`);
         err.status = res.status;
@@ -63,4 +62,10 @@ export async function saveData(fileId, jsonData) {
 export async function deleteData(fileId) {
     if (!fileId) return;
     await request(`${API}/${fileId}`, { method: 'DELETE' });
+}
+
+/** E-mail da conta (usado como dica para renovar o login sem escolher conta). */
+export async function getUserEmail() {
+    const res = await request('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)');
+    return (await res.json())?.user?.emailAddress || '';
 }

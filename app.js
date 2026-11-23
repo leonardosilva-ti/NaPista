@@ -1,5 +1,5 @@
-import { initAuth, login, logout, hasValidToken, invalidateToken } from './auth.js';
-import { findDataFile, readData, saveData, deleteData } from './drive.js';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js';
 import * as L from './logic.js';
 
 // ═══════════════════════ Constantes ═══════════════════════
@@ -9,8 +9,10 @@ const PLATFORM_COLORS = ['#10b981', '#60a5fa', '#f59e0b', '#a78bfa', '#f472b6', 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const WEEKDAYS_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const MONTHS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
-const MAIN_SCREENS = ['dashboard-screen', 'reports-screen', 'profile-screen'];
-const PENDING_KEY = 'napista_pending';
+const MAIN_SCREENS = ['dashboard-screen', 'reports-screen', 'goals-screen', 'profile-screen'];
+const CACHE_KEY = 'napista_cache';     // cópia local dos dados (abre o app sem precisar de login)
+const OLD_PENDING_KEY = 'napista_pending';
+const PULL_INTERVAL_MS = 5 * 60 * 1000;
 
 const ICON_TRASH = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>';
 
@@ -27,7 +29,9 @@ const state = {
     setupPlatforms: [],
     setupOptions: [],
     editingExpense: null,
-    reportExpenses: []
+    reportExpenses: [],
+    editingGoal: null,
+    goalWeekdays: []
 };
 
 // ═══════════════════════ Utilidades ═══════════════════════
@@ -111,6 +115,13 @@ function normalizeData(raw) {
         d.expenses = L.dayExpenses(d);
     });
     data.history.sort((a, b) => a.date.localeCompare(b.date));
+
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    data.goals = (Array.isArray(data.goals) ? data.goals : []).filter(g =>
+        g && g.id && L.num(g.amount) > 0 && dateRe.test(g.startDate) && dateRe.test(g.deadline));
+    data.goals.forEach(g => {
+        if (!Array.isArray(g.weekdays) || !g.weekdays.length) g.weekdays = [...L.ALL_WEEKDAYS];
+    });
     return data;
 }
 
@@ -146,19 +157,28 @@ function confirmDialog({ title, message, confirmLabel = 'Confirmar', danger = fa
 }
 
 // ═══════════════════════ Sincronização com o Drive ═══════════════════════
+// Os dados ficam sempre numa cópia local (localStorage). O app abre direto
+// dessa cópia, sem pedir login; o Google Drive é sincronizado quando há um
+// token válido. O token do Google dura só 1 hora e só pode ser renovado com
+// um toque do usuário (popup), então a renovação acontece apenas quando é
+// preciso sincronizar — e, com o e-mail salvo como dica, o popup fecha sozinho.
 let changeVersion = 0;
 let savedVersion = 0;
 let saveTimer = null;
 let inflight = null;
 let saveAgain = false;
 let authToastShown = false;
+let syncing = null;
+let lastPull = 0;
+let autoRenewTried = false;
 
 const SYNC_LABELS = {
     saved: 'Salvo',
     pending: 'Alterado',
     saving: 'Salvando…',
     error: 'Não salvo · tentar',
-    auth: 'Toque para salvar',
+    auth: 'Sincronizar',
+    stale: 'Sincronizar',
     offline: 'Offline'
 };
 
@@ -167,36 +187,51 @@ function setSync(status) {
     pill.dataset.state = status;
     $('sync-label').textContent = SYNC_LABELS[status];
     pill.title = status === 'error' ? 'Toque para tentar salvar novamente'
-        : status === 'auth' ? 'Sua sessão do Google expirou. Toque para renovar e salvar.' : '';
+        : status === 'auth' ? 'Alterações salvas no aparelho. Toque para enviar ao Google Drive.'
+        : status === 'stale' ? 'Mostrando os dados salvos no aparelho. Toque para buscar a versão do Google Drive.' : '';
     if (status === 'auth' && !authToastShown) {
         authToastShown = true;
-        toast('Sessão do Google expirou. Toque em "Salvar" para sincronizar.', {
-            action: 'Salvar', duration: 8000, onAction: () => flushSave(true)
+        toast('Alterações guardadas no aparelho. Toque em "Sincronizar" para enviar ao Drive.', {
+            action: 'Sincronizar', duration: 8000, onAction: () => syncNow()
         });
     }
     if (status === 'saved') authToastShown = false;
 }
 
 const hasUnsaved = () => changeVersion !== savedVersion;
+const needsSync = () => hasUnsaved() || !lastPull;
 
-function writePending() {
+function writeCache() {
+    if (!state.data) return;
     try {
-        localStorage.setItem(PENDING_KEY, JSON.stringify({ fileId: state.fileId, savedAt: Date.now(), data: state.data }));
+        localStorage.setItem(CACHE_KEY, JSON.stringify({
+            fileId: state.fileId, dirty: hasUnsaved(), updatedAt: Date.now(), data: state.data
+        }));
     } catch { /* sem espaço / modo privado */ }
 }
 
-function readPending() {
-    try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch { return null; }
+function readCache() {
+    try {
+        const cache = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+        if (cache?.data) return cache;
+        // formato antigo: só existia cópia local de alterações não salvas
+        const old = JSON.parse(localStorage.getItem(OLD_PENDING_KEY) || 'null');
+        if (old?.data) return { fileId: old.fileId, dirty: true, data: old.data };
+    } catch { /* ignora */ }
+    return null;
 }
 
-function clearPending() {
-    try { localStorage.removeItem(PENDING_KEY); } catch { /* ignora */ }
+function clearCache() {
+    try {
+        localStorage.removeItem(CACHE_KEY);
+        localStorage.removeItem(OLD_PENDING_KEY);
+    } catch { /* ignora */ }
 }
 
 /** Registra uma alteração: guarda cópia local e agenda envio ao Drive. */
 function markChanged(delay = 1500) {
     changeVersion++;
-    writePending();
+    writeCache();
     setSync('pending');
     clearTimeout(saveTimer);
     saveTimer = setTimeout(flushSave, delay);
@@ -211,7 +246,7 @@ function flushSave(interactive = false) {
     saveTimer = null;
     if (inflight) { saveAgain = true; return inflight; }
     if (!hasUnsaved() || !state.data) return Promise.resolve();
-    if (!interactive && !hasValidToken()) { setSync('auth'); return Promise.resolve(); }
+    if (!interactive && !hasValidToken()) { setSync(navigator.onLine ? 'auth' : 'offline'); return Promise.resolve(); }
 
     const version = changeVersion;
     setSync('saving');
@@ -219,12 +254,13 @@ function flushSave(interactive = false) {
         .then(id => {
             state.fileId = id;
             savedVersion = version;
-            if (!hasUnsaved()) { clearPending(); setSync('saved'); }
-            else writePending();
+            lastPull = lastPull || Date.now();
+            writeCache();
+            if (!hasUnsaved()) setSync('saved');
         })
         .catch(err => {
             console.error('Erro ao salvar:', err);
-            setSync(navigator.onLine ? 'error' : 'offline');
+            setSync(!navigator.onLine ? 'offline' : (err?.name === 'AuthError' || err?.status === 401) ? 'auth' : 'error');
         })
         .finally(() => {
             inflight = null;
@@ -237,7 +273,79 @@ function resetSync() {
     clearTimeout(saveTimer);
     changeVersion = savedVersion = 0;
     saveAgain = false;
+    lastPull = 0;
     setSync('saved');
+}
+
+/**
+ * Sincroniza com o Drive: se há alterações locais, envia; senão, busca a versão
+ * do Drive (pode ter sido alterada em outro aparelho). Requer token válido.
+ */
+function syncWithDrive() {
+    if (syncing) return syncing;
+    if (!hasValidToken()) {
+        setSync(hasUnsaved() ? 'auth' : 'stale');
+        return Promise.resolve();
+    }
+    syncing = (async () => {
+        try {
+            if (!hasUnsaved()) setSync('saving');
+            const fileId = await findDataFile();
+            if (hasUnsaved()) {
+                state.fileId = fileId; // se o arquivo sumiu (apagado em outro aparelho), cria um novo
+                await flushSave();
+                return;
+            }
+            const remote = fileId ? await readData(fileId) : null;
+            if (hasUnsaved()) { await flushSave(); return; } // usuário alterou algo durante o download
+            state.fileId = fileId;
+            lastPull = Date.now();
+            if (remote) {
+                const incoming = normalizeData(remote);
+                if (JSON.stringify(incoming) !== JSON.stringify(state.data)) {
+                    state.data = incoming;
+                    rerenderAfterSync();
+                }
+            } else if (fileId === null && state.data) {
+                // nada no Drive ainda: envia a cópia local
+                changeVersion++;
+                await flushSave();
+                return;
+            }
+            writeCache();
+            setSync('saved');
+            if (!getAccountHint()) getUserEmail().then(setAccountHint).catch(() => {});
+        } catch (e) {
+            console.error('Erro ao sincronizar:', e);
+            const authErr = e?.name === 'AuthError' || e?.status === 401;
+            if (authErr) invalidateToken();
+            setSync(!navigator.onLine ? 'offline' : authErr ? (hasUnsaved() ? 'auth' : 'stale') : 'error');
+        } finally {
+            syncing = null;
+        }
+    })();
+    return syncing;
+}
+
+/** Renova o token (precisa ser chamado dentro de um toque) e sincroniza. */
+function syncNow() {
+    if (!isAuthReady()) { toast('Sem conexão com o Google no momento.', { type: 'error' }); return; }
+    const renew = hasValidToken() ? Promise.resolve() : getToken(); // abre o popup ainda dentro do toque
+    renew.then(() => syncWithDrive()).catch(e => {
+        console.error(e);
+        if (e?.type !== 'popup_closed') toast('Não foi possível conectar ao Google. Tente novamente.', { type: 'error' });
+        setSync(hasUnsaved() ? 'auth' : 'stale');
+    });
+}
+
+function rerenderAfterSync() {
+    renderPlatformInputs();
+    const active = document.querySelector('.screen.active')?.id;
+    if (active === 'dashboard-screen') renderDashboard();
+    else if (active === 'reports-screen') renderReports();
+    else if (active === 'goals-screen') renderGoals();
+    else if (active === 'profile-screen') renderProfile();
+    else if (active === 'setup-screen' && L.isConfigured(settings())) showScreen('dashboard-screen');
 }
 
 // ═══════════════════════ Navegação ═══════════════════════
@@ -256,6 +364,7 @@ function showScreen(id) {
 
     if (id === 'dashboard-screen') renderDashboard();
     if (id === 'reports-screen') renderReports();
+    if (id === 'goals-screen') renderGoals();
     if (id === 'profile-screen') renderProfile();
 }
 
@@ -277,6 +386,16 @@ function showLoadError(message, retry) {
 
 // ═══════════════════════ Inicialização / login ═══════════════════════
 async function boot() {
+    const cache = readCache();
+    if (cache) {
+        // Abre na hora com os dados do aparelho; o login do Google carrega em segundo plano.
+        openWithData(cache.data, cache.fileId, !!cache.dirty);
+        initAuth()
+            .then(ok => { if (ok) syncWithDrive(); else setSync(hasUnsaved() ? 'auth' : 'stale'); })
+            .catch(e => { console.error(e); setSync(navigator.onLine ? (hasUnsaved() ? 'auth' : 'stale') : 'offline'); });
+        return;
+    }
+
     showLoading();
     try {
         const hasSession = await initAuth();
@@ -286,6 +405,19 @@ async function boot() {
         console.error(e);
         showLoadError('Não foi possível carregar o login do Google. Verifique sua conexão ou desative bloqueadores de anúncio.', () => location.reload());
     }
+}
+
+function openWithData(data, fileId, dirty = false) {
+    resetSync();
+    state.data = normalizeData(data);
+    state.fileId = fileId ?? null;
+    state.anchor = state.dayAnchor = todayDate();
+    state.scope = 'day';
+    if (dirty) changeVersion = 1;
+    writeCache();
+    renderPlatformInputs();
+    if (L.isConfigured(state.data.settings)) showScreen('dashboard-screen');
+    else openSetup();
 }
 
 async function handleLogin() {
@@ -306,34 +438,16 @@ async function loadUserData() {
     showLoading('Carregando seus dados…');
     try {
         const fileId = await findDataFile();
-        let data = fileId ? await readData(fileId) : null;
-        state.fileId = fileId;
-
-        resetSync();
-        const pending = readPending();
-        const recovered = !!(pending?.data && pending.fileId === fileId);
-        if (recovered) data = pending.data;
-        else clearPending();
-
-        state.data = normalizeData(data);
-        state.anchor = state.dayAnchor = todayDate();
-        state.scope = 'day';
-        renderPlatformInputs();
-
-        if (recovered) {
-            changeVersion = 1;
-            flushSave();
-            toast('Recuperamos alterações que não tinham sido salvas.');
-        }
-
-        if (L.isConfigured(state.data.settings)) showScreen('dashboard-screen');
-        else openSetup();
+        const data = fileId ? await readData(fileId) : null;
+        openWithData(data, fileId);
+        lastPull = Date.now();
+        getUserEmail().then(setAccountHint).catch(() => {});
     } catch (e) {
         console.error(e);
         if (e?.name === 'AuthError' || e?.status === 401 || e?.status === 403) {
             invalidateToken();
             showScreen('login-screen');
-            toast('Sua sessão expirou. Entre novamente.');
+            toast('Não foi possível acessar sua conta. Entre novamente.');
         } else {
             showLoadError('Não foi possível acessar seu Google Drive. Verifique a conexão.', loadUserData);
         }
@@ -471,6 +585,7 @@ function refreshDashboard() {
     renderHero(r);
     renderStats(r.summary);
     renderExpenses(r.summary);
+    renderGoalWidget();
 }
 
 function renderDateNav() {
@@ -871,6 +986,232 @@ function openReportExpenses() {
     $('report-expenses-dialog').showModal();
 }
 
+// ═══════════════════════ Metas com prazo ═══════════════════════
+const goals = () => state.data.goals;
+const goalTitle = (g) => g.name?.trim() || `Meta de ${brl(L.num(g.amount))}`;
+const fullDate = (key) => { const d = L.parseDateKey(key); return `${shortDate(d)}/${d.getFullYear()}`; };
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const STATUS_ORDER = { active: 0, scheduled: 1, done: 2, expired: 3 };
+
+function goalResults() {
+    const s = settings();
+    const now = new Date();
+    return goals()
+        .map(g => L.goalProgress(g, s, state.data.history, now))
+        .sort((a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status])
+            || (a.status === 'done' || a.status === 'expired'
+                ? b.goal.deadline.localeCompare(a.goal.deadline)
+                : a.goal.deadline.localeCompare(b.goal.deadline)));
+}
+
+function goalTodayLine(r) {
+    if (r.status !== 'active') return '';
+    if (!r.todayIsWork) return `<p class="goal-today">Hoje não é dia de trabalho nesta meta. Próximos dias: ${brl(r.porDia)} líquidos por dia.</p>`;
+    if (r.hojeFalta <= 0) return '<p class="goal-today ok">Ritmo de hoje cumprido para esta meta.</p>';
+    return `<p class="goal-today">Hoje faltam <strong>${brl(r.hojeFalta)}</strong> líquidos para ficar no ritmo.</p>`;
+}
+
+function renderGoalWidget() {
+    const body = $('goal-widget-body');
+    if (!body || !state.data) return;
+    const list = goalResults().filter(r => r.status === 'active' || r.status === 'scheduled');
+
+    if (!list.length) {
+        const finished = goals().length;
+        body.innerHTML = `<p class="goal-empty-text">${finished
+            ? 'Nenhuma meta em andamento. Crie uma nova e veja quanto precisa fazer por dia.'
+            : 'Tem um objetivo? Diga quanto quer fazer de lucro líquido e até quando: calculamos quanto você precisa fazer por dia.'}</p>
+            ${finished ? '<div class="goal-more"><button type="button" class="link-btn" data-goto-goals>Ver metas anteriores</button></div>' : ''}`;
+        return;
+    }
+
+    const shown = list.slice(0, 2);
+    body.innerHTML = shown.map(r => {
+        const pct = Math.round(r.progress * 100);
+        const sub = r.status === 'scheduled'
+            ? `Começa em ${fullDate(r.goal.startDate)}`
+            : `${brl(r.porDia)}/dia · ${plural(r.diasRestantes, 'dia', 'dias')} até ${fullDate(r.goal.deadline)}`;
+        return `
+        <div class="goal-mini">
+            <div class="goal-mini-head"><span class="goal-mini-name">${esc(goalTitle(r.goal))}</span><span class="goal-mini-pct">${pct}%</span></div>
+            <div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div>
+            <div class="goal-mini-line"><span><strong>${brl(r.net)}</strong> de ${brl(r.meta)}</span><span>${sub}</span></div>
+            ${goalTodayLine(r)}
+        </div>`;
+    }).join('') + `<div class="goal-more"><button type="button" class="link-btn" data-goto-goals>${list.length > shown.length ? `Ver todas (${list.length})` : 'Ver detalhes'}</button></div>`;
+}
+
+function renderGoals() {
+    if (!state.data) return;
+    const results = goalResults();
+    $('goals-empty').hidden = results.length > 0;
+
+    const open = results.filter(r => r.status === 'active' || r.status === 'scheduled');
+    const closed = results.filter(r => r.status === 'done' || r.status === 'expired');
+    let html = open.map(goalCard).join('');
+    if (closed.length) {
+        html += `<h2 class="subhead goals-section-title">Encerradas e concluídas</h2>` + closed.map(goalCard).join('');
+    }
+    $('goals-list').innerHTML = html;
+}
+
+function goalCard(r) {
+    const g = r.goal;
+    const pct = Math.round(r.progress * 100);
+    const s = settings();
+    const workDaysLabel = g.weekdays.length === 7 ? 'todos os dias'
+        : g.weekdays.slice().sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map(d => WEEKDAYS_SHORT[d]).join(', ');
+
+    let details = '';
+    if (r.status === 'active' || r.status === 'scheduled') {
+        const lucroOk = r.kmPorDia > 0;
+        details = `
+            <div class="stat-grid">
+                <div class="stat"><span class="stat-label">Líquido por dia</span><span class="stat-value big">${brl(r.porDia)}</span><span class="stat-sub">${plural(r.diasRestantes, 'dia de trabalho', 'dias de trabalho')}</span></div>
+                <div class="stat"><span class="stat-label">Falta</span><span class="stat-value">${brl(r.falta)}</span><span class="stat-sub">${plural(r.calendarDaysLeft, 'dia', 'dias')} no calendário</span></div>
+                ${lucroOk ? `
+                <div class="stat"><span class="stat-label">Faturar por dia</span><span class="stat-value">${brl(r.brutoPorDia)}</span><span class="stat-sub">bruto estimado</span></div>
+                <div class="stat"><span class="stat-label">Rodar por dia</span><span class="stat-value">≈ ${fmt(r.kmPorDia, 0)} km</span><span class="stat-sub">a ${brl(L.num(s.mediaPagamentoKm))}/km</span></div>` : ''}
+            </div>
+            ${r.status === 'scheduled' ? `<p class="goal-status">Começa a contar em ${fullDate(g.startDate)}.</p>` : goalTodayLine(r)}`;
+    } else if (r.status === 'done') {
+        details = `<p class="goal-status">Meta batida!${r.excedente > 0 ? ` Você passou ${brl(r.excedente)} do objetivo.` : ''}</p>`;
+    } else {
+        details = `<p class="goal-status">Prazo encerrado. Faltaram ${brl(r.falta)} (${pct}% concluído).</p>`;
+    }
+
+    return `
+    <article class="card goal-card" data-status="${r.status}">
+        <div class="goal-head">
+            <div>
+                <h2 class="goal-name">${esc(goalTitle(g))}</h2>
+                <p class="goal-dates">${fullDate(g.startDate)} até ${fullDate(g.deadline)} · ${esc(workDaysLabel)}</p>
+            </div>
+            <span class="badge">${pct}%</span>
+        </div>
+        <p class="goal-amounts"><strong>${brl(r.net)}</strong> de ${brl(r.meta)} líquidos</p>
+        <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div class="progress-fill" style="width:${pct}%"></div></div>
+        ${details}
+        <div class="goal-actions">
+            <button type="button" class="btn btn-ghost btn-sm" data-goal-edit="${esc(g.id)}">Editar</button>
+            <button type="button" class="btn btn-danger-ghost btn-sm" data-goal-del="${esc(g.id)}">Excluir</button>
+        </div>
+    </article>`;
+}
+
+function renderGoalWeekdays() {
+    // Exibe de segunda a domingo
+    $('goal-weekdays').innerHTML = [1, 2, 3, 4, 5, 6, 0].map(d => `
+        <button type="button" class="chip" data-weekday="${d}" aria-pressed="${state.goalWeekdays.includes(d)}" aria-label="${WEEKDAYS[d]}">${WEEKDAYS_SHORT[d]}</button>
+    `).join('');
+}
+
+function openGoalDialog(id = null) {
+    const g = id ? goals().find(x => x.id === id) : null;
+    const today = todayDate();
+    state.editingGoal = g ? g.id : null;
+    $('goal-dialog-title').textContent = g ? 'Editar meta' : 'Nova meta';
+    $('goal-submit').textContent = g ? 'Salvar' : 'Criar meta';
+    $('goal-amount').value = g ? moneyInput(L.num(g.amount)) : '';
+    $('goal-name').value = g?.name || '';
+    $('goal-start').value = g?.startDate || L.toDateKey(today);
+    $('goal-deadline').value = g?.deadline || L.toDateKey(L.getMonthRange(today).end);
+    state.goalWeekdays = g ? [...g.weekdays] : L.defaultWorkWeekdays(settings());
+    renderGoalWeekdays();
+    updateGoalPreview();
+    $('goal-dialog').showModal();
+    if (!g) setTimeout(() => $('goal-amount').focus(), 50);
+}
+
+function readGoalForm() {
+    return {
+        amount: parseDecimal($('goal-amount').value),
+        name: $('goal-name').value.trim(),
+        startDate: $('goal-start').value,
+        deadline: $('goal-deadline').value,
+        weekdays: [...state.goalWeekdays]
+    };
+}
+
+function updateGoalPreview() {
+    const f = readGoalForm();
+    const el = $('goal-preview');
+    if (!(f.amount > 0) || !f.startDate || !f.deadline || !f.weekdays.length) { el.hidden = true; return; }
+    el.hidden = false;
+    el.classList.remove('warn');
+
+    if (f.deadline < f.startDate) {
+        el.classList.add('warn');
+        el.innerHTML = '<div>A data final precisa ser depois da data de início.</div>';
+        return;
+    }
+    if (f.deadline < L.toDateKey(todayDate())) {
+        el.classList.add('warn');
+        el.innerHTML = '<div>A data para bater a meta já passou.</div>';
+        return;
+    }
+
+    const r = L.goalProgress(f, settings(), state.data.history);
+    if (r.status === 'done') {
+        el.innerHTML = `<div class="preview-row"><span>Você já fez ${brl(r.net)} nesse período</span><strong>Meta batida</strong></div>`;
+        return;
+    }
+    const rows = [['Você precisa fazer por dia', `${brl(r.porDia)} líquidos`]];
+    if (r.brutoPorDia > 0) rows.push(['Faturamento bruto por dia', `≈ ${brl(r.brutoPorDia)}`], ['Rodagem por dia', `≈ ${fmt(r.kmPorDia, 0)} km`]);
+    rows.push(['Dias de trabalho até a data', String(r.diasRestantes)]);
+    if (r.net !== 0) rows.push(['Já feito no período', brl(r.net)]);
+    el.innerHTML = rows.map(([k, v]) => `<div class="preview-row"><span>${k}</span><strong>${v}</strong></div>`).join('');
+}
+
+function saveGoal(e) {
+    e.preventDefault();
+    const f = readGoalForm();
+    const fail = (msg, id) => { toast(msg, { type: 'error' }); if (id) $(id).focus(); };
+    if (!(f.amount > 0)) return fail('Informe quanto quer fazer de lucro líquido.', 'goal-amount');
+    if (!f.startDate) return fail('Informe a data de início.', 'goal-start');
+    if (!f.deadline) return fail('Informe até quando quer bater a meta.', 'goal-deadline');
+    if (f.deadline < f.startDate) return fail('A data final precisa ser depois da data de início.', 'goal-deadline');
+    if (!state.editingGoal && f.deadline < L.toDateKey(todayDate())) return fail('A data para bater a meta já passou.', 'goal-deadline');
+    if (!f.weekdays.length) return fail('Escolha pelo menos um dia de trabalho.');
+
+    const existing = state.editingGoal && goals().find(g => g.id === state.editingGoal);
+    if (existing) {
+        Object.assign(existing, f);
+    } else {
+        goals().push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), createdAt: Date.now(), ...f });
+    }
+    $('goal-dialog').close();
+    markChanged(0);
+    toast(existing ? 'Meta atualizada.' : 'Meta criada! Acompanhe o progresso na tela Início.');
+    const active = document.querySelector('.screen.active')?.id;
+    if (active === 'goals-screen') renderGoals();
+    else if (active === 'dashboard-screen') renderGoalWidget();
+}
+
+async function deleteGoal(id) {
+    const idx = goals().findIndex(g => g.id === id);
+    if (idx === -1) return;
+    const g = goals()[idx];
+    const ok = await confirmDialog({
+        title: 'Excluir meta?',
+        message: `"${goalTitle(g)}" será removida. Seus ganhos lançados não são afetados.`,
+        confirmLabel: 'Excluir',
+        danger: true
+    });
+    if (!ok) return;
+    goals().splice(idx, 1);
+    markChanged();
+    renderGoals();
+    toast('Meta excluída.', {
+        action: 'Desfazer',
+        onAction: () => {
+            goals().splice(Math.min(idx, goals().length), 0, g);
+            markChanged();
+            renderGoals();
+        }
+    });
+}
+
 // ═══════════════════════ Ajustes ═══════════════════════
 function renderProfile() {
     if (!state.data) return;
@@ -912,7 +1253,7 @@ async function handleLogout() {
         if (!ok) return;
     }
     logout();
-    clearPending();
+    clearCache();
     resetSync();
     state.data = null;
     state.fileId = null;
@@ -927,16 +1268,21 @@ async function handleWipe() {
         danger: true
     });
     if (!ok) return;
+    if (!hasValidToken()) {
+        toast('Toque em "Sincronizar" no topo para conectar ao Google e tente de novo.', { type: 'error', duration: 6000 });
+        setSync(hasUnsaved() ? 'auth' : 'stale');
+        return;
+    }
 
     showLoading('Apagando dados…');
     try {
         clearTimeout(saveTimer);
         if (inflight) await inflight;
         await deleteData(state.fileId);
-        clearPending();
         resetSync();
         state.fileId = null;
         state.data = L.createDefaultData();
+        writeCache();
         state.reportKey = null;
         toast('Dados apagados. Vamos configurar do zero.');
         openSetup();
@@ -958,6 +1304,7 @@ function bindEvents() {
 
         if (t.classList.contains('day-input')) commitDayForm();
         if (t.closest('#setup-form')) updateSetupPreview();
+        if (t.closest('#goal-form')) updateGoalPreview();
     });
 
     $('btn-login').addEventListener('click', handleLogin);
@@ -1013,6 +1360,33 @@ function bindEvents() {
         $('expense-val').focus();
     });
 
+    // Metas
+    $('btn-create-goal').addEventListener('click', () => openGoalDialog());
+    $('btn-new-goal').addEventListener('click', () => openGoalDialog());
+    $('btn-new-goal-empty').addEventListener('click', () => openGoalDialog());
+    $('goal-widget-body').addEventListener('click', (e) => {
+        if (e.target.closest('[data-goto-goals]')) showScreen('goals-screen');
+    });
+    $('goals-list').addEventListener('click', (e) => {
+        const edit = e.target.closest('[data-goal-edit]');
+        const del = e.target.closest('[data-goal-del]');
+        if (edit) openGoalDialog(edit.dataset.goalEdit);
+        if (del) deleteGoal(del.dataset.goalDel);
+    });
+    $('goal-form').addEventListener('submit', saveGoal);
+    $('goal-form').addEventListener('change', (e) => {
+        if (e.target.type === 'date') updateGoalPreview();
+    });
+    $('goal-weekdays').addEventListener('click', (e) => {
+        const chip = e.target.closest('[data-weekday]');
+        if (!chip) return;
+        const d = Number(chip.dataset.weekday);
+        const i = state.goalWeekdays.indexOf(d);
+        if (i === -1) state.goalWeekdays.push(d); else state.goalWeekdays.splice(i, 1);
+        chip.setAttribute('aria-pressed', i === -1);
+        updateGoalPreview();
+    });
+
     // Relatórios
     document.querySelectorAll('#report-seg .seg-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -1055,15 +1429,30 @@ function bindEvents() {
 
     // Sincronização
     $('sync-pill').addEventListener('click', () => {
-        if (hasUnsaved()) flushSave(true); // dentro do clique: permite renovar o login se preciso
-        else toast(hasValidToken() ? 'Tudo salvo no seu Google Drive.' : 'Tudo salvo.');
+        if (!state.data) return;
+        if (needsSync() || !hasValidToken()) syncNow(); // dentro do clique: permite renovar o login
+        else toast('Tudo salvo no seu Google Drive.');
     });
-    window.addEventListener('online', () => { if (hasUnsaved()) flushSave(); });
+    // Token expirado com algo para sincronizar: aproveita o primeiro toque num
+    // botão para renovar (popup rápido que fecha sozinho), uma vez por abertura.
+    document.addEventListener('click', (e) => {
+        if (autoRenewTried || !state.data || !isAuthReady() || hasValidToken() || !navigator.onLine) return;
+        if (!hasUnsaved()) return;
+        const btn = e.target.closest('button');
+        if (!btn || btn.id === 'sync-pill' || btn.closest('dialog')) return;
+        autoRenewTried = true;
+        syncNow();
+    }, true);
+    window.addEventListener('online', () => { if (needsSync()) syncWithDrive(); });
     window.addEventListener('offline', () => { if (hasUnsaved()) setSync('offline'); });
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden' && hasUnsaved() && hasValidToken()) flushSave();
-        // ao voltar ao app num novo dia, atualiza o "hoje"
-        if (document.visibilityState === 'visible' && state.data && $('dashboard-screen').classList.contains('active')) renderDateNav();
+        if (document.visibilityState === 'visible' && state.data) {
+            // busca alterações feitas em outro aparelho
+            if (hasValidToken() && (hasUnsaved() || Date.now() - lastPull > PULL_INTERVAL_MS)) syncWithDrive();
+            // ao voltar ao app num novo dia, atualiza o "hoje"
+            if ($('dashboard-screen').classList.contains('active')) { renderDateNav(); renderGoalWidget(); }
+        }
     });
 }
 

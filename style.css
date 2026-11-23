@@ -163,6 +163,8 @@ body:not(.has-nav) #app { padding-bottom: calc(24px + var(--safe-b)); }
 .sync-pill[data-state="error"] .sync-dot, .sync-pill[data-state="offline"] .sync-dot { background: var(--danger); }
 .sync-pill[data-state="auth"] { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .sync-pill[data-state="auth"] .sync-dot { background: var(--warn); }
+.sync-pill[data-state="stale"] { color: var(--info); }
+.sync-pill[data-state="stale"] .sync-dot { background: var(--info); }
 @keyframes pulse { 50% { opacity: 0.35; } }
 
 /* ===================== Cards ===================== */
@@ -501,3 +503,50 @@ body:not(.has-nav) .toast { bottom: calc(24px + var(--safe-b)); }
 .toast[data-type="error"] { background: var(--danger); color: #fff; }
 .toast-action { color: var(--brand); font-weight: 700; text-transform: uppercase; font-size: 0.82rem; letter-spacing: 0.04em; }
 @media (prefers-color-scheme: light) { .toast-action { color: #34d399; } }
+
+/* ===================== Metas ===================== */
+.page-head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+.goal-widget .card-head { margin-bottom: 10px; }
+.goal-widget .progress { margin: 10px 0 8px; height: 8px; }
+.goal-empty-text { color: var(--text-2); font-size: 0.92rem; }
+.goal-mini + .goal-mini { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
+.goal-mini-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.goal-mini-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.goal-mini-pct { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-2); font-size: 0.88rem; }
+.goal-mini-line { font-size: 0.86rem; color: var(--text-2); display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.goal-mini-line strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.goal-today {
+    margin-top: 10px; padding: 9px 12px; border-radius: var(--radius-sm);
+    background: var(--info-soft); color: var(--info); font-size: 0.88rem; font-weight: 500;
+}
+.goal-today.ok { background: var(--brand-soft); color: var(--brand-text); }
+.goal-more { display: flex; justify-content: center; margin-top: 10px; }
+
+.goal-card .goal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.goal-card .goal-name { font-size: 1.1rem; font-weight: 700; overflow-wrap: anywhere; }
+.goal-card .goal-dates { font-size: 0.82rem; color: var(--text-3); margin-top: 2px; }
+.goal-card .goal-amounts { margin-top: 12px; font-size: 0.92rem; color: var(--text-2); }
+.goal-card .goal-amounts strong { font-size: 1.6rem; font-weight: 800; color: var(--text); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; margin-right: 4px; }
+.goal-card .progress { margin: 10px 0 12px; }
+.goal-card .stat-grid { margin: 12px 0 0; }
+.goal-card .stat { background: var(--surface-2); border-color: transparent; }
+.goal-card .stat-value.big { color: var(--brand-text); }
+.goal-status {
+    margin-top: 12px; padding: 10px 12px; border-radius: var(--radius-sm);
+    font-size: 0.9rem; font-weight: 500; background: var(--surface-2); color: var(--text-2);
+}
+.goal-card[data-status="done"] { border-color: color-mix(in srgb, var(--brand) 45%, transparent); }
+.goal-card[data-status="done"] .goal-status { background: var(--brand-soft); color: var(--brand-text); }
+.goal-card[data-status="done"] .badge { background: var(--brand-soft); color: var(--brand-text); }
+.goal-card[data-status="expired"] .goal-status { background: var(--warn-soft); color: var(--warn); }
+.goal-card[data-status="expired"] .progress-fill { background: var(--warn); }
+.goal-actions { display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end; }
+.goal-actions .btn-danger-ghost { width: auto; }
+.goals-section-title { margin: 22px 0 10px; }
+
+.chips-days { gap: 6px; margin-bottom: 0; }
+.chips-days .chip { padding: 7px 0; width: calc((100% - 36px) / 7); text-align: center; font-size: 0.82rem; }
+.chips-days .chip[aria-pressed="true"]::before { content: none; }
+
+.bottom-nav .nav-item .ico { width: 48px; padding: 3px 12px; }

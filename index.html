@@ -46,7 +46,7 @@
                 <p class="login-tagline">Saiba exatamente quanto falta para bater a meta, a cada corrida.</p>
             </div>
             <ul class="feature-list">
-                <li><span class="feature-ico"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg></span>Metas diárias, semanais e mensais que se ajustam sozinhas</li>
+                <li><span class="feature-ico"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg></span>Metas com prazo: saiba quanto fazer por dia até a data</li>
                 <li><span class="feature-ico"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M3 21h12M14 9h2a2 2 0 0 1 2 2v5a1.5 1.5 0 0 0 3 0V8l-3-3M7 7h4"/></svg></span>Custo de combustível calculado pelos km rodados</li>
                 <li><span class="feature-ico"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M6 17V11M11 17V5M16 17v-8M21 17v-4"/></svg></span>Relatórios por aplicativo e por período</li>
             </ul>
@@ -158,6 +158,14 @@
                 <button type="button" class="btn btn-soft" id="hero-fix" hidden>Revisar metas</button>
             </section>
 
+            <section class="card goal-widget" id="goal-widget">
+                <div class="card-head">
+                    <h2 class="card-title">Minhas metas</h2>
+                    <button type="button" class="btn btn-soft btn-sm btn-icon-text" id="btn-create-goal"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Criar meta</button>
+                </div>
+                <div id="goal-widget-body"></div>
+            </section>
+
             <section class="stat-grid" aria-label="Resumo do período">
                 <div class="stat"><span class="stat-label">Bruto</span><span class="stat-value" id="stat-gross">R$ 0,00</span></div>
                 <div class="stat"><span class="stat-label">Combustível</span><span class="stat-value neg" id="stat-fuel">R$ 0,00</span><span class="stat-sub" id="stat-fuel-sub">estimado</span></div>
@@ -253,6 +261,21 @@
             </div>
         </section>
 
+        <!-- METAS -->
+        <section id="goals-screen" class="screen">
+            <div class="page-head page-head-row">
+                <h1>Metas</h1>
+                <button type="button" class="btn btn-primary btn-sm btn-icon-text" id="btn-new-goal"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Nova meta</button>
+            </div>
+            <div id="goals-empty" class="empty-state" hidden>
+                <div class="empty-ico"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" style="width:44px;height:44px"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg></div>
+                <p>Você ainda não tem metas.</p>
+                <p class="muted small">Diga quanto quer fazer de lucro líquido e até quando. A gente calcula quanto você precisa fazer por dia.</p>
+                <button type="button" class="btn btn-primary" id="btn-new-goal-empty" style="margin-top:18px">Criar minha primeira meta</button>
+            </div>
+            <div id="goals-list"></div>
+        </section>
+
         <!-- AJUSTES -->
         <section id="profile-screen" class="screen">
             <div class="page-head"><h1>Ajustes</h1></div>
@@ -285,7 +308,7 @@
                     <button type="button" class="btn btn-danger-ghost" id="btn-wipe">Apagar todos os dados</button>
                 </div>
             </section>
-            <p class="version">Na Pista · v2.0</p>
+            <p class="version">Na Pista · v2.1</p>
         </section>
     </main>
 
@@ -298,6 +321,10 @@
         <button type="button" class="nav-item" data-target="reports-screen">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M6 17V11M11 17V5M16 17v-8M21 17v-4"/></svg>
             <span>Relatórios</span>
+        </button>
+        <button type="button" class="nav-item" data-target="goals-screen">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>
+            <span>Metas</span>
         </button>
         <button type="button" class="nav-item" data-target="profile-screen">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg>
@@ -322,6 +349,40 @@
             <div class="dialog-actions">
                 <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
                 <button type="submit" class="btn btn-primary">Salvar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Diálogo: meta -->
+    <dialog id="goal-dialog" class="sheet" aria-labelledby="goal-dialog-title">
+        <form id="goal-form" class="dialog-body" novalidate>
+            <h2 id="goal-dialog-title">Nova meta</h2>
+            <label class="field">
+                <span class="field-label">Quanto você quer fazer de lucro líquido?</span>
+                <span class="input-wrap"><span class="prefix">R$</span><input type="text" inputmode="numeric" id="goal-amount" class="money" placeholder="3.000,00" autocomplete="off"></span>
+            </label>
+            <label class="field">
+                <span class="field-label">Nome (opcional)</span>
+                <input type="text" id="goal-name" maxlength="40" placeholder="Ex: Pneus novos, Férias, IPVA" autocomplete="off">
+            </label>
+            <div class="grid-2">
+                <label class="field">
+                    <span class="field-label">Contar a partir de</span>
+                    <input type="date" id="goal-start">
+                </label>
+                <label class="field">
+                    <span class="field-label">Bater a meta até</span>
+                    <input type="date" id="goal-deadline">
+                </label>
+            </div>
+            <div class="field">
+                <span class="field-label">Dias da semana que você trabalha</span>
+                <div class="chips chips-sm chips-days" id="goal-weekdays" role="group" aria-label="Dias de trabalho"></div>
+            </div>
+            <div class="preview" id="goal-preview" hidden></div>
+            <div class="dialog-actions">
+                <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+                <button type="submit" class="btn btn-primary" id="goal-submit">Criar meta</button>
             </div>
         </form>
     </dialog>
