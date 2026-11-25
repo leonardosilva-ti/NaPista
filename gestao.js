@@ -1,6 +1,6 @@
 // Gestão na Pista: telas do controle financeiro (resumo, lançamentos, cartões e contas).
-import * as L from './logic.js?v=2.6.2';
-import * as F from './finance.js?v=2.6.2';
+import * as L from './logic.js?v=2.7.0';
+import * as F from './finance.js?v=2.7.0';
 
 export const GESTAO_SCREENS = ['fin-home-screen', 'fin-entries-screen', 'fin-cards-screen', 'fin-accounts-screen'];
 
@@ -67,6 +67,7 @@ export function createGestao(ctx) {
     const catBadge = (cat) => `<span class="cat-dot" style="--c:${esc(cat.color)}" aria-hidden="true">${esc((cat.name || '?').trim().charAt(0).toUpperCase())}</span>`;
 
     function recTag(o) {
+        if (o.forecast) return '<span class="tag tag-info">Previsão</span>';
         if (o.virtual) return '<span class="tag tag-brand">Na Pista</span>';
         if (o.kind === 'fixed') return '<span class="tag">Fixo</span>';
         if (o.kind === 'installment') return `<span class="tag">${o.n}/${o.total}</span>`;
@@ -85,14 +86,14 @@ export function createGestao(ctx) {
         ui.occMap.set(o.id, o);
         const sub = [
             showDate ? weekdayDate(o.date) : null,
-            o.virtual ? esc(o.apps?.length ? o.apps.join(', ') : 'Na Pista') : esc(cat.name),
+            o.forecast ? 'Meta líquida do dia' : o.virtual ? esc(o.apps?.length ? o.apps.join(', ') : 'Na Pista') : esc(cat.name),
             `<span class="where">${whereLabel(o)}</span>`
         ].filter(Boolean).join(' · ');
         return `
-        <li><button type="button" class="list-item fin-row${future ? ' is-future' : ''}" data-occ="${esc(o.id)}">
+        <li><button type="button" class="list-item fin-row${future ? ' is-future' : ''}${o.forecast ? ' is-forecast' : ''}" data-occ="${esc(o.id)}">
             ${catBadge(cat)}
             <span class="item-main">
-                <span class="item-title">${esc(o.desc || cat.name)} ${recTag(o)}${future ? ' <span class="tag tag-info">Previsto</span>' : ''}</span>
+                <span class="item-title">${esc(o.desc || cat.name)} ${recTag(o)}${future && !o.forecast ? ' <span class="tag tag-info">Previsto</span>' : ''}</span>
                 <span class="item-sub">${sub}</span>
             </span>
             <span class="item-value ${o.type === 'income' ? 'pos' : 'neg'}">${signedBrl(o)}</span>
@@ -234,6 +235,10 @@ export function createGestao(ctx) {
             : '<li class="empty">Nada programado para os próximos 10 dias.</li>';
 
         const integ = fin().integration;
+        const fcOn = fin().forecast && F.canForecast(data());
+        const fcHint = sum.forecastDays
+            ? `+ ${brl(sum.forecast)} em ${plural(sum.forecastDays, 'dia de trabalho', 'dias de trabalho')} ainda não ${sum.forecastDays === 1 ? 'lançado' : 'lançados'}`
+            : 'nenhum dia de trabalho a prever neste mês';
         $('fin-home-body').innerHTML = `
             ${monthNav()}
             <section class="card hero fin-hero" data-state="${heroValue < 0 ? 'missed' : 'progress'}">
@@ -241,11 +246,12 @@ export function createGestao(ctx) {
                 <div class="hero-value ${heroValue < 0 ? 'neg' : ''}">${brl(heroValue)}</div>
                 <p class="hero-sub">${heroSub}</p>
             </section>
+            ${forecastCard(fcOn, fcHint)}
             ${ym === cur ? alertsHtml : ''}
             <section class="stat-grid" aria-label="Resumo do mês">
-                <button type="button" class="stat stat-btn" data-goto-filter="income"><span class="stat-label">Receitas</span><span class="stat-value pos">${brl(sum.income)}</span><span class="stat-sub">${integ.mode === 'gross' ? 'apps pelo bruto' : 'apps pelo líquido'}</span></button>
+                <button type="button" class="stat stat-btn" data-goto-filter="income"><span class="stat-label">Receitas</span><span class="stat-value pos">${brl(sum.income)}</span><span class="stat-sub">${fcOn && sum.forecast > 0 ? `${brl(sum.forecast)} previstos` : integ.mode === 'gross' ? 'apps pelo bruto' : 'apps pelo líquido'}</span></button>
                 <button type="button" class="stat stat-btn" data-goto-filter="expense"><span class="stat-label">Despesas</span><span class="stat-value neg">${brl(sum.expense)}</span><span class="stat-sub">${sum.cardExpense > 0 ? `${brl(sum.cardExpense)} no cartão` : 'contas e cartões'}</span></button>
-                <div class="stat"><span class="stat-label">Resultado do mês</span><span class="stat-value ${sum.result < 0 ? 'neg' : 'pos'}">${brl(sum.result)}</span><span class="stat-sub">receitas − despesas</span></div>
+                <div class="stat"><span class="stat-label">${fcOn && sum.forecast > 0 ? 'Resultado previsto' : 'Resultado do mês'}</span><span class="stat-value ${sum.result < 0 ? 'neg' : 'pos'}">${brl(sum.result)}</span><span class="stat-sub">${fcOn && sum.forecast > 0 ? `lançado: ${brl(sum.realResult)}` : 'receitas − despesas'}</span></div>
                 <button type="button" class="stat stat-btn" data-goto="fin-cards-screen"><span class="stat-label">Faturas do mês</span><span class="stat-value">${brl(sum.invoiceTotal)}</span><span class="stat-sub">${sum.invoices.length ? plural(sum.invoices.length, 'cartão', 'cartões') : 'nenhuma fatura'}</span></button>
             </section>
             <section class="card">
@@ -266,11 +272,29 @@ export function createGestao(ctx) {
             </section>`;
     }
 
+    /** Liga/desliga da previsão com metas (meta líquida diária nos dias ainda não lançados). */
+    function forecastCard(on, hint) {
+        const can = F.canForecast(data());
+        const daily = can ? L.dailyTarget(data().settings, L.parseDateKey(`${ui.month}-01`)) : 0;
+        const sub = !can
+            ? 'Defina a meta mensal no Na Pista (Ajustes) para usar a previsão.'
+            : on ? `${hint}. Meta de ${brl(daily)} líquidos por dia.`
+            : `Mostra a receita e o resultado do mês se você bater a meta de ${brl(daily)} líquidos por dia.`;
+        return `
+            <section class="card fin-forecast${on ? ' is-on' : ''}">
+                <label class="switch-row">
+                    <span class="switch-text"><strong>Previsão com metas</strong><span>${sub}</span></span>
+                    <input type="checkbox" class="switch" id="fin-forecast-toggle" ${on ? 'checked' : ''} ${can ? '' : 'disabled'}>
+                </label>
+            </section>`;
+    }
+
     // ── Lançamentos ──
     function renderEntries() {
         const { start, end } = F.monthRange(ui.month);
         const all = F.occurrences(data(), start, end);
         const income = all.filter(o => o.type === 'income').reduce((a, o) => a + o.amount, 0);
+        const fcTotal = all.filter(o => o.forecast).reduce((a, o) => a + o.amount, 0);
         const expense = all.filter(o => o.type === 'expense').reduce((a, o) => a + o.amount, 0);
         const list = all.filter(o => ui.filter === 'all' ? true
             : ui.filter === 'card' ? !!o.cardId
@@ -299,6 +323,7 @@ export function createGestao(ctx) {
                 <span>Despesas<strong class="neg">${brl(expense)}</strong></span>
                 <span>Resultado<strong class="${income - expense < 0 ? 'neg' : 'pos'}">${brl(income - expense)}</strong></span>
             </div>
+            ${fcTotal > 0 ? `<p class="fin-forecast-note">Inclui ${brl(fcTotal)} de previsão pela meta diária. Desligue em Resumo para ver só os lançados.</p>` : ''}
             <section class="card card-list">
                 <ul class="list list-select fin-list">${rows || '<li class="empty">Nenhum lançamento neste mês. Toque em + para lançar.</li>'}</ul>
             </section>`;
@@ -1120,6 +1145,12 @@ export function createGestao(ctx) {
     function openOccurrence(id) {
         const o = ui.occMap.get(id);
         if (!o) return;
+        if (o.forecast) {
+            toast('Previsão pela meta líquida do dia. Quando você lançar o dia no Na Pista, entra o valor real.', {
+                action: 'Lançar dia', duration: 6000, onAction: () => ctx.openNaPistaDay(o.date)
+            });
+            return;
+        }
         if (o.virtual) {
             const mode = fin().integration.mode === 'gross' ? 'bruto' : 'líquido';
             toast(`Valor ${mode} do dia lançado no Na Pista${o.apps?.length ? ` (${o.apps.join(', ')})` : ''}.`, {
@@ -1135,6 +1166,13 @@ export function createGestao(ctx) {
     // ═══════════════════════ Eventos ═══════════════════════
     function bind() {
         const screens = ['fin-home-body', 'fin-entries-body', 'fin-cards-body', 'fin-accounts-body'];
+        $('fin-home-body').addEventListener('change', (e) => {
+            if (e.target.id !== 'fin-forecast-toggle') return;
+            fin().forecast = e.target.checked;
+            markChanged();
+            rerender();
+            toast(e.target.checked ? 'Previsão com metas ligada.' : 'Mostrando só os lançados.');
+        });
         screens.forEach(id => $(id).addEventListener('click', (e) => {
             const t = e.target;
             const month = t.closest('[data-fin-month]');

@@ -1,6 +1,6 @@
 // Gestão na Pista: regras de finanças pessoais (contas, lançamentos e cartões).
 // Sem dependência de DOM. Datas sempre como "AAAA-MM-DD" no fuso do aparelho.
-import { num, toDateKey, parseDateKey, dayNet, dayGross } from './logic.js?v=2.6.2';
+import { num, toDateKey, parseDateKey, dayNet, dayGross, dailyTarget, workWeekdays } from './logic.js?v=2.7.0';
 
 export const WALLET_ID = 'carteira';
 export const APPS_CATEGORY_ID = 'r_apps';
@@ -58,6 +58,7 @@ export const defaultFinance = () => ({
     setupDone: false,
     // mode: 'net' (líquido) ou 'gross' (bruto); since: a partir de quando os ganhos entram (null = todos)
     integration: { mode: null, accountId: WALLET_ID, since: null },
+    forecast: false, // previsão: meta líquida diária nos dias de trabalho ainda não lançados
     accounts: [{ id: WALLET_ID, name: 'Carteira', kind: 'dinheiro', initial: 0 }],
     categories: defaultCategories(),
     cards: [],
@@ -182,6 +183,7 @@ export function normalizeFinance(raw) {
             accountId: accIds.has(integ.accountId) ? integ.accountId : WALLET_ID,
             since: DATE_RE.test(integ.since || '') ? integ.since : null
         },
+        forecast: f.forecast === true,
         accounts, categories, cards, entries, payments, transfers
     };
 }
@@ -275,11 +277,56 @@ export function napistaOccurrences(data, fromKey, toKey) {
     return out;
 }
 
-/** Todas as ocorrências (contas, cartões e Na Pista) no intervalo, em ordem de data. */
-export function occurrences(data, fromKey, toKey) {
+/** A previsão pode ser ligada: há meta líquida mensal no Na Pista. */
+export const canForecast = (data) => num(data.settings?.metaLiquidaMensal) > 0;
+
+/**
+ * Previsão com metas: cada dia de trabalho, de hoje em diante, que ainda não
+ * foi lançado no Na Pista recebe a meta líquida diária (meta mensal ÷ dias de
+ * trabalho do mês). O valor é fixo, não compensa o que faltou ou sobrou em
+ * outros dias. Dias já lançados entram pelo valor real (napistaOccurrences).
+ */
+export function forecastOccurrences(data, fromKey, toKey, todayKey = toDateKey(new Date())) {
+    const fin = data.finance;
+    if (!fin?.setupDone || !fin.forecast || !canForecast(data)) return [];
+    const { accountId, since } = fin.integration;
+    let lo = fromKey > todayKey ? fromKey : todayKey;
+    if (since && since > lo) lo = since;
+    if (lo > toKey) return [];
+    const launched = new Set(data.history.map(d => d.date));
+    const weekdays = workWeekdays(data.settings);
+    const perMonth = new Map();
+    const out = [];
+    for (let k = lo; k <= toKey; k = addDaysKey(k, 1)) {
+        const d = parseDateKey(k);
+        if (launched.has(k) || !weekdays.includes(d.getDay())) continue;
+        const ym = ymOf(k);
+        if (!perMonth.has(ym)) perMonth.set(ym, Math.round(dailyTarget(data.settings, d) * 100) / 100);
+        const amount = perMonth.get(ym);
+        if (amount < 0.005) continue;
+        out.push({
+            id: `fc:${k}`,
+            virtual: true,
+            forecast: true,
+            date: k,
+            amount,
+            type: 'income',
+            desc: 'Previsão pela meta',
+            categoryId: APPS_CATEGORY_ID,
+            accountId,
+            cardId: null,
+            kind: 'once'
+        });
+    }
+    return out;
+}
+
+/** Todas as ocorrências (contas, cartões, Na Pista e previsão) no intervalo, em ordem de data. */
+export function occurrences(data, fromKey, toKey, todayKey = toDateKey(new Date())) {
     const list = [];
     data.finance.entries.forEach(e => list.push(...expandEntry(e, fromKey, toKey)));
     list.push(...napistaOccurrences(data, fromKey, toKey));
+    list.push(...forecastOccurrences(data, fromKey, toKey, todayKey));
     return list.sort((a, b) => a.date.localeCompare(b.date) || (a.type === b.type ? 0 : a.type === 'income' ? -1 : 1));
 }
 
@@ -442,6 +489,8 @@ export function balances(data, uptoKey, todayKey = toDateKey(new Date())) {
     fin.transfers.forEach(t => { if (t.date <= uptoKey) { add(t.fromId, -t.amount); add(t.toId, t.amount); } });
 
     if (uptoKey > todayKey) {
+        // o saldo de hoje é só o realizado; a previsão (incluindo hoje) entra no saldo futuro
+        forecastOccurrences(data, todayKey, uptoKey, todayKey).forEach(o => add(o.accountId, o.amount));
         fin.cards.forEach(card => {
             for (const [ym, list] of cardInvoices(data, card, uptoKey, uptoKey)) {
                 if (isSettled(card, ym) || invoiceDates(card, ym).due > uptoKey) continue;
@@ -472,15 +521,18 @@ export const totalBalance = (data, map) => data.finance.accounts.reduce((a, acc)
 /** Receitas e despesas do mês pela data de cada lançamento (compras no cartão pela data da compra). */
 export function monthSummary(data, ym, todayKey) {
     const { start, end } = monthRange(ym);
-    const occs = occurrences(data, start, end);
-    const r = { occs, income: 0, expense: 0, cardExpense: 0, byCategory: new Map(), invoices: [] };
+    const occs = occurrences(data, start, end, todayKey);
+    const r = { occs, income: 0, expense: 0, cardExpense: 0, forecast: 0, forecastDays: 0, byCategory: new Map(), invoices: [] };
     for (const o of occs) {
+        if (o.forecast) { r.forecast += o.amount; r.forecastDays++; }
         if (o.type === 'income') { r.income += o.amount; continue; }
         r.expense += o.amount;
         if (o.cardId) r.cardExpense += o.amount;
         r.byCategory.set(o.categoryId, (r.byCategory.get(o.categoryId) || 0) + o.amount);
     }
     r.result = r.income - r.expense;
+    r.realIncome = r.income - r.forecast;
+    r.realResult = r.realIncome - r.expense;
     // faturas que vencem neste mês (a fatura do mês "ym" vence nele)
     data.finance.cards.forEach(card => {
         const inv = cardInvoice(data, card, ym, todayKey);

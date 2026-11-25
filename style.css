@@ -825,3 +825,27 @@ body.mode-gestao .brand { font-size: 1rem; gap: 8px; }
 .calc-key.op { background: var(--brand-soft); color: var(--brand-text); }
 .calc-key.fn { background: var(--surface-3); color: var(--text-2); font-size: 1.1rem; }
 .calc-key.eq { grid-row: span 2; background: var(--surface-3); color: var(--brand-text); }
+
+/* ── Gestão: previsão com metas ── */
+.fin-forecast { padding: 14px 16px; }
+.fin-forecast.is-on { border-color: color-mix(in srgb, var(--info) 45%, transparent); }
+.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; cursor: pointer; }
+.switch-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.switch-text strong { font-size: 0.95rem; }
+.switch-text span { font-size: 0.8rem; color: var(--text-3); line-height: 1.35; }
+.switch {
+    appearance: none; -webkit-appearance: none; flex: none; margin: 0;
+    width: 46px; height: 28px; border-radius: 999px; position: relative; cursor: pointer;
+    background: var(--surface-3); border: 1px solid var(--border, transparent); transition: background .18s;
+}
+.switch::after {
+    content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 0.3); transition: transform .18s;
+}
+.switch:checked { background: var(--info); }
+.switch:checked::after { transform: translateX(18px); }
+.switch:disabled { opacity: 0.45; cursor: not-allowed; }
+.switch:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+.fin-row.is-forecast { opacity: 0.78; }
+.fin-row.is-forecast .cat-dot { outline: 1.5px dashed var(--info); outline-offset: 1px; }
+.fin-forecast-note { font-size: 0.78rem; color: var(--text-3); margin: 0 4px 10px; }
