@@ -1,9 +1,9 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.6.0';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.6.0';
-import * as L from './logic.js?v=2.6.0';
-import * as P from './plans.js?v=2.6.0';
-import * as F from './finance.js?v=2.6.0';
-import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.6.0';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.6.1';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.6.1';
+import * as L from './logic.js?v=2.6.1';
+import * as P from './plans.js?v=2.6.1';
+import * as F from './finance.js?v=2.6.1';
+import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.6.1';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -1754,6 +1754,96 @@ function handlePaymentReturn() {
     setTimeout(poll, 1500);
 }
 
+// ═══════════════════════ Instalar o app (PWA) ═══════════════════════
+// O Chrome no Android só mostra o aviso automático de instalação de vez em
+// quando (e some por um tempo depois de dispensado ou desinstalado). Guardamos
+// o evento para o botão "Instalar" funcionar sempre. O iOS não tem instalação
+// automática: mostramos o passo a passo do "Adicionar à Tela de Início".
+const INSTALL_NUDGE_KEY = 'napista_install_nudge';
+let installPrompt = null;
+
+const isStandalone = () => window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isAndroid = () => /Android/i.test(navigator.userAgent);
+
+function renderInstall() {
+    const installed = isStandalone();
+    $('install-card').hidden = installed;
+    document.querySelectorAll('.install-link').forEach(b => { b.hidden = installed; });
+    if (installed) return;
+    $('install-desc').textContent = installPrompt
+        ? 'Tenha o Na Pista na tela inicial, abrindo em tela cheia como um app.'
+        : isIOS()
+            ? 'No iPhone, a instalação é feita pelo botão Compartilhar do navegador. Toque abaixo para ver como.'
+            : 'Tenha o Na Pista na tela inicial. Toque abaixo para ver como instalar.';
+}
+
+async function installApp() {
+    if (installPrompt) {
+        const ev = installPrompt;
+        installPrompt = null;
+        try {
+            await ev.prompt();
+            const { outcome } = await ev.userChoice;
+            if (outcome !== 'accepted') toast('Instalação cancelada. Você pode instalar depois em Ajustes.');
+        } catch (e) {
+            console.error(e);
+            openInstallHelp();
+        }
+        renderInstall();
+        return;
+    }
+    openInstallHelp();
+}
+
+function openInstallHelp() {
+    let steps, note = '';
+    if (isIOS()) {
+        steps = [
+            'Abra o Na Pista no <strong>Safari</strong> (no iOS 16.4 ou mais novo também funciona no Chrome).',
+            'Toque no botão <strong>Compartilhar</strong> (o quadrado com uma seta para cima).',
+            'Role e toque em <strong>Adicionar à Tela de Início</strong>.',
+            'Toque em <strong>Adicionar</strong>. O ícone aparece na sua tela inicial.'
+        ];
+        note = 'No app instalado, entre com sua conta Google uma vez: seus dados vêm do Google Drive.';
+    } else if (isAndroid()) {
+        steps = [
+            'Toque no menu <strong>⋮</strong> do Chrome, no canto superior direito.',
+            'Escolha <strong>Instalar app</strong> (ou <strong>Adicionar à tela inicial</strong>).',
+            'Confirme em <strong>Instalar</strong>.'
+        ];
+        note = 'Acabou de desinstalar? O Chrome pode levar alguns minutos para liberar a instalação de novo. Se a opção não aparecer, feche e abra o Chrome.';
+    } else {
+        steps = [
+            'No Chrome ou Edge, clique no ícone de <strong>instalar</strong> na barra de endereço (um monitor com uma seta).',
+            'Ou abra o menu do navegador e escolha <strong>Instalar Na Pista</strong>.'
+        ];
+    }
+    $('install-steps').innerHTML = steps.map(s => `<li>${s}</li>`).join('');
+    $('install-note').textContent = note;
+    $('install-note').hidden = !note;
+    $('install-dialog').showModal();
+}
+
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault(); // usamos nosso próprio botão em vez da barrinha automática
+    installPrompt = e;
+    renderInstall();
+    // lembrete discreto, no máximo uma vez a cada 14 dias
+    let last = 0;
+    try { last = Number(localStorage.getItem(INSTALL_NUDGE_KEY)) || 0; } catch { /* ignora */ }
+    if (state.data && Date.now() - last > 14 * 86400000) {
+        try { localStorage.setItem(INSTALL_NUDGE_KEY, String(Date.now())); } catch { /* ignora */ }
+        setTimeout(() => toast('Instale o Na Pista na tela inicial.', { action: 'Instalar', duration: 8000, onAction: installApp }), 2500);
+    }
+});
+
+window.addEventListener('appinstalled', () => {
+    installPrompt = null;
+    renderInstall();
+    toast('App instalado! Abra pelo ícone na tela inicial.');
+});
+
 // ═══════════════════════ Eventos (registrados uma única vez) ═══════════════════════
 function bindEvents() {
     // Máscaras e lançamentos do dia (delegação: funciona para inputs criados dinamicamente)
@@ -1769,6 +1859,7 @@ function bindEvents() {
     });
 
     $('btn-login').addEventListener('click', handleLogin);
+    document.addEventListener('click', (e) => { if (e.target.closest('[data-install]')) installApp(); });
 
     // Planos
     $('btn-plans').addEventListener('click', () => openPlans());
@@ -1953,5 +2044,6 @@ const gestao = createGestao({
 });
 
 bindEvents();
+renderInstall();
 boot();
 handlePaymentReturn();

@@ -1,6 +1,6 @@
 // Network-first para os arquivos do app: sempre pega a versão mais nova
 // quando há internet e usa o cache quando está offline.
-const CACHE_NAME = 'napista-v13';
+const CACHE_NAME = 'napista-v14';
 const ASSETS = [
     './',
     './index.html',
