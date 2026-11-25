@@ -799,3 +799,29 @@ body.mode-gestao .brand { font-size: 1rem; gap: 8px; }
 .install-link { margin-top: -4px; }
 .install-steps { margin-bottom: 4px; }
 .install-steps strong { color: var(--text); }
+
+/* calculadora do campo de valor */
+.calc-btn {
+    width: 42px; height: 42px; margin-right: 4px; flex-shrink: 0;
+    display: grid; place-items: center; border-radius: 10px; color: var(--brand-text);
+}
+.calc-btn:hover, .calc-btn:focus-visible { background: var(--brand-soft); }
+.calc-display {
+    background: var(--surface-2); border-radius: var(--radius-sm);
+    padding: 14px 16px; margin-bottom: 12px; text-align: right; min-height: 92px;
+    display: flex; flex-direction: column; justify-content: flex-end; gap: 2px;
+}
+.calc-expr { font-size: 1.7rem; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; line-height: 1.2; }
+.calc-result { font-size: 0.95rem; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.calc-result.neg { color: var(--danger); }
+.calc-keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.calc-key {
+    min-height: 54px; border-radius: 14px; background: var(--surface-2);
+    font-size: 1.35rem; font-weight: 600; font-variant-numeric: tabular-nums;
+    transition: background 0.12s, transform 0.08s;
+}
+.calc-key:hover { background: var(--surface-3); }
+.calc-key:active { transform: scale(0.96); }
+.calc-key.op { background: var(--brand-soft); color: var(--brand-text); }
+.calc-key.fn { background: var(--surface-3); color: var(--text-2); font-size: 1.1rem; }
+.calc-key.eq { grid-row: span 2; background: var(--surface-3); color: var(--brand-text); }

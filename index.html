@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=2.6.1">
+    <link rel="stylesheet" href="style.css?v=2.6.2">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -340,7 +340,7 @@
                 </div>
             </section>
             <p class="made-by"><span class="covem-mark" aria-hidden="true"></span>Um app Covem.</p>
-            <p class="version">Na Pista · v2.6.1</p>
+            <p class="version">Na Pista · v2.6.2</p>
         </section>
         <!-- ═════════ GESTÃO NA PISTA ═════════ -->
         <section id="fin-home-screen" class="screen">
@@ -572,7 +572,7 @@
             </div>
             <label class="field">
                 <span class="field-label" id="fin-entry-amount-label">Valor</span>
-                <span class="input-wrap input-big"><span class="prefix">R$</span><input type="text" inputmode="numeric" id="fin-entry-amount" class="money" placeholder="0,00" autocomplete="off"></span>
+                <span class="input-wrap input-big"><span class="prefix">R$</span><input type="text" inputmode="numeric" id="fin-entry-amount" class="money" placeholder="0,00" autocomplete="off"><button type="button" class="calc-btn" data-calc="fin-entry-amount" aria-label="Abrir calculadora" title="Calculadora"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M8 6h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h4"/></svg></button></span>
             </label>
             <label class="field">
                 <span class="field-label">Descrição</span>
@@ -702,7 +702,7 @@
             <p class="preview fin-pay-info" id="fin-pay-info"></p>
             <label class="field" style="margin-top:12px">
                 <span class="field-label">Valor pago</span>
-                <span class="input-wrap input-big"><span class="prefix">R$</span><input type="text" inputmode="numeric" id="fin-pay-amount" class="money" placeholder="0,00" autocomplete="off"></span>
+                <span class="input-wrap input-big"><span class="prefix">R$</span><input type="text" inputmode="numeric" id="fin-pay-amount" class="money" placeholder="0,00" autocomplete="off"><button type="button" class="calc-btn" data-calc="fin-pay-amount" aria-label="Abrir calculadora" title="Calculadora"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M8 6h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h4"/></svg></button></span>
             </label>
             <div class="grid-2">
                 <label class="field"><span class="field-label">Data do pagamento</span><input type="date" id="fin-pay-date"></label>
@@ -723,7 +723,7 @@
             <h2 id="fin-transfer-title">Transferência entre contas</h2>
             <label class="field">
                 <span class="field-label">Valor</span>
-                <span class="input-wrap input-big"><span class="prefix">R$</span><input type="text" inputmode="numeric" id="fin-transfer-amount" class="money" placeholder="0,00" autocomplete="off"></span>
+                <span class="input-wrap input-big"><span class="prefix">R$</span><input type="text" inputmode="numeric" id="fin-transfer-amount" class="money" placeholder="0,00" autocomplete="off"><button type="button" class="calc-btn" data-calc="fin-transfer-amount" aria-label="Abrir calculadora" title="Calculadora"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M8 6h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h4"/></svg></button></span>
             </label>
             <div class="transfer-accounts">
                 <label class="field"><span class="field-label">De</span><select id="fin-transfer-from"></select></label>
@@ -744,12 +744,48 @@
         </form>
     </dialog>
 
+    <!-- Calculadora do campo de valor -->
+    <dialog id="calc-dialog" class="sheet" aria-labelledby="calc-title">
+        <div class="dialog-body">
+            <h2 id="calc-title">Calculadora</h2>
+            <div class="calc-display" aria-live="polite">
+                <div class="calc-expr" id="calc-expr">0</div>
+                <div class="calc-result" id="calc-result">= R$ 0,00</div>
+            </div>
+            <div class="calc-keys" id="calc-keys">
+                <button type="button" class="calc-key fn" data-key="clear" aria-label="Limpar">C</button>
+                <button type="button" class="calc-key fn" data-key="back" aria-label="Apagar">⌫</button>
+                <button type="button" class="calc-key op" data-key="÷">÷</button>
+                <button type="button" class="calc-key op" data-key="×">×</button>
+                <button type="button" class="calc-key" data-key="7">7</button>
+                <button type="button" class="calc-key" data-key="8">8</button>
+                <button type="button" class="calc-key" data-key="9">9</button>
+                <button type="button" class="calc-key op" data-key="−">−</button>
+                <button type="button" class="calc-key" data-key="4">4</button>
+                <button type="button" class="calc-key" data-key="5">5</button>
+                <button type="button" class="calc-key" data-key="6">6</button>
+                <button type="button" class="calc-key op" data-key="+">+</button>
+                <button type="button" class="calc-key" data-key="1">1</button>
+                <button type="button" class="calc-key" data-key="2">2</button>
+                <button type="button" class="calc-key" data-key="3">3</button>
+                <button type="button" class="calc-key eq" data-key="eq" aria-label="Igual">=</button>
+                <button type="button" class="calc-key" data-key="00">00</button>
+                <button type="button" class="calc-key" data-key="0">0</button>
+                <button type="button" class="calc-key" data-key=",">,</button>
+            </div>
+            <div class="dialog-actions">
+                <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+                <button type="button" class="btn btn-primary" id="calc-use">Usar valor</button>
+            </div>
+        </div>
+    </dialog>
+
     <div class="toast" id="toast" role="status" aria-live="polite">
         <span id="toast-msg"></span>
         <button type="button" class="toast-action" id="toast-action" hidden></button>
     </div>
 
-    <script src="app.js?v=2.6.1" type="module"></script>
+    <script src="app.js?v=2.6.2" type="module"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {

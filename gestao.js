@@ -1,6 +1,6 @@
 // Gestão na Pista: telas do controle financeiro (resumo, lançamentos, cartões e contas).
-import * as L from './logic.js?v=2.6.1';
-import * as F from './finance.js?v=2.6.1';
+import * as L from './logic.js?v=2.6.2';
+import * as F from './finance.js?v=2.6.2';
 
 export const GESTAO_SCREENS = ['fin-home-screen', 'fin-entries-screen', 'fin-cards-screen', 'fin-accounts-screen'];
 
@@ -1284,10 +1284,115 @@ export function createGestao(ctx) {
         });
     }
 
+    // ═══════════════════════ Calculadora do campo de valor ═══════════════════════
+    // Conta simples (+ − × ÷, com vírgula decimal) e o resultado vai direto para o campo.
+    const calc = { expr: '', target: null };
+    const CALC_OPS = ['+', '−', '×', '÷'];
+    const calcNum = (n) => n.toLocaleString('pt-BR', { maximumFractionDigits: 2, useGrouping: false });
+
+    /** Resultado da expressão (× e ÷ antes de + e −); null se não der para calcular. */
+    function calcEval(expr) {
+        const tokens = expr.split(/([+−×÷])/).filter(t => t !== '');
+        if (CALC_OPS.includes(tokens[tokens.length - 1])) tokens.pop();
+        if (tokens[0] === '−') tokens.unshift('0');
+        if (!tokens.length) return 0;
+        const nums = [], ops = [];
+        for (const t of tokens) {
+            if (CALC_OPS.includes(t)) ops.push(t);
+            else nums.push(parseFloat(t.replace(',', '.')) || 0);
+        }
+        // primeiro × e ÷
+        const n2 = [nums[0]], o2 = [];
+        for (let i = 0; i < ops.length; i++) {
+            const b = nums[i + 1];
+            if (ops[i] === '×') n2[n2.length - 1] *= b;
+            else if (ops[i] === '÷') { if (b === 0) return null; n2[n2.length - 1] /= b; }
+            else { o2.push(ops[i]); n2.push(b); }
+        }
+        let r = n2[0];
+        o2.forEach((op, i) => { r = op === '+' ? r + n2[i + 1] : r - n2[i + 1]; });
+        return Number.isFinite(r) ? Math.round(r * 100) / 100 : null;
+    }
+
+    function renderCalc() {
+        const r = calcEval(calc.expr);
+        $('calc-expr').textContent = calc.expr ? calc.expr.replace(/([+−×÷])/g, ' $1 ') : '0';
+        const res = $('calc-result');
+        res.classList.toggle('neg', r === null || r < 0);
+        res.textContent = r === null ? 'Não dá para dividir por zero' : `= ${brl(r)}`;
+        $('calc-use').textContent = r !== null && r > 0 ? `Usar ${brl(r)}` : 'Usar valor';
+        $('calc-use').disabled = !(r > 0);
+    }
+
+    function calcKey(k) {
+        const e = calc.expr;
+        const last = e.slice(-1);
+        const current = e.split(/[+−×÷]/).pop(); // número sendo digitado
+        if (k === 'clear') calc.expr = '';
+        else if (k === 'back') calc.expr = e.slice(0, -1);
+        else if (k === 'eq') { const r = calcEval(e); if (r !== null) calc.expr = r === 0 ? '' : calcNum(r); }
+        else if (CALC_OPS.includes(k)) {
+            if (!e) { if (k === '−') calc.expr = '−'; }
+            else if (CALC_OPS.includes(last)) calc.expr = e.length > 1 ? e.slice(0, -1) + k : e;
+            else calc.expr = (last === ',' ? e.slice(0, -1) : e) + k;
+        } else if (k === ',') {
+            if (!current.includes(',')) calc.expr = e + (current === '' || CALC_OPS.includes(last) ? '0,' : ',');
+        } else {
+            // dígitos: limite de 2 casas decimais e 10 dígitos por número
+            const dec = current.includes(',') ? current.split(',')[1].length : -1;
+            const digits = current.replace(/\D/g, '').length;
+            if (dec + k.length > 2 && dec >= 0) return;
+            if (digits + k.length > 10) return;
+            if (current === '0' && !current.includes(',')) calc.expr = e.slice(0, -1) + k.replace(/^0+(?=\d)/, '');
+            else if (k === '00' && current === '') calc.expr = e + '0';
+            else calc.expr = e + k;
+        }
+        renderCalc();
+    }
+
+    function openCalc(inputId) {
+        calc.target = inputId;
+        const v = parseDecimal($(inputId).value);
+        calc.expr = v > 0 ? calcNum(v) : '';
+        renderCalc();
+        $('calc-dialog').showModal();
+    }
+
+    function useCalc() {
+        const r = calcEval(calc.expr);
+        if (!(r > 0)) { toast('O resultado precisa ser maior que zero.', { type: 'error' }); return; }
+        if (r > 9999999.99) { toast('Valor muito alto.', { type: 'error' }); return; }
+        const input = $(calc.target);
+        input.value = moneyInput(r);
+        input.dispatchEvent(new Event('input', { bubbles: true })); // atualiza máscara e prévias
+        $('calc-dialog').close();
+    }
+
+    function bindCalc() {
+        document.addEventListener('click', (e) => {
+            const b = e.target.closest('[data-calc]');
+            if (b) openCalc(b.dataset.calc);
+        });
+        $('calc-keys').addEventListener('click', (e) => {
+            const k = e.target.closest('[data-key]');
+            if (k) calcKey(k.dataset.key);
+        });
+        $('calc-use').addEventListener('click', useCalc);
+        // teclado físico (computador)
+        $('calc-dialog').addEventListener('keydown', (e) => {
+            const map = { '*': '×', 'x': '×', 'X': '×', '/': '÷', '-': '−', '+': '+', '.': ',', ',': ',', 'Backspace': 'back', 'Delete': 'clear', '=': 'eq' };
+            if (e.key === 'Enter') { e.preventDefault(); useCalc(); return; }
+            const k = /^\d$/.test(e.key) ? e.key : map[e.key];
+            if (!k) return;
+            e.preventDefault();
+            calcKey(k);
+        });
+    }
+
     return {
         render,
         rerender,
-        bind,
+        bind: () => { bind(); bindCalc(); },
         dayHint,
         needsOnboarding,
         openOnboarding,
