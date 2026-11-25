@@ -1,7 +1,7 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.3.3';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.3.3';
-import * as L from './logic.js?v=2.3.3';
-import * as P from './plans.js?v=2.3.3';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.4.0';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.4.0';
+import * as L from './logic.js?v=2.4.0';
+import * as P from './plans.js?v=2.4.0';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -131,7 +131,7 @@ function normalizeData(raw) {
     data.goals.forEach(g => {
         if (!Array.isArray(g.weekdays) || !g.weekdays.length) g.weekdays = [...L.ALL_WEEKDAYS];
         if (!Number.isFinite(g.priority)) delete g.priority;
-        g.showOnHome = g.showOnHome === true;
+        delete g.showOnHome; // opção antiga "mostrar no início", não usada mais
     });
     return data;
 }
@@ -1039,7 +1039,6 @@ const goalTitle = (g) => g.name?.trim() || `Meta de ${brl(L.num(g.amount))}`;
 const fullDate = (key) => { const d = L.parseDateKey(key); return `${shortDate(d)}/${d.getFullYear()}`; };
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const isOpenGoal = (r) => r.status === 'active' || r.status === 'scheduled';
-const MAX_HOME_GOALS = 2;
 const ICON_UP = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>';
 const ICON_DOWN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
 
@@ -1123,10 +1122,10 @@ function renderGoalWidget() {
     }
 
     let html;
-    if (list.length <= MAX_HOME_GOALS) {
-        html = list.map(goalMini).join('');
+    if (list.length === 1) {
+        html = goalMini(list[0]);
     } else {
-        // muitas metas: uma linha com o total + as que o usuário escolheu mostrar (até 2)
+        // várias metas: só o agregado, o total para bater todas
         const meta = list.reduce((a, r) => a + r.meta, 0);
         const net = list.reduce((a, r) => a + Math.max(0, r.net), 0);
         html = homeGoalRow({
@@ -1134,7 +1133,7 @@ function renderGoalWidget() {
             progress: meta > 0 ? Math.min(1, net / meta) : 0,
             gross: list.reduce((a, r) => a + r.gross, 0),
             falta: list.reduce((a, r) => a + r.falta, 0)
-        }) + list.filter(r => r.goal.showOnHome).slice(0, MAX_HOME_GOALS).map(goalMini).join('');
+        });
     }
     body.innerHTML = html + '<div class="goal-more"><button type="button" class="link-btn" data-goto-goals>Ver metas</button></div>';
 }
@@ -1160,7 +1159,7 @@ function renderGoals() {
             ${manual ? '<button type="button" class="link-btn" data-goal-auto>Voltar à automática</button>' : ''}
         </div>`;
     }
-    const ctx = { openCount: open.length, pinnedCount: open.filter(r => r.goal.showOnHome).length };
+    const ctx = { openCount: open.length };
     html += open.map((r, i) => goalCard(r, { ...ctx, pos: i })).join('');
     if (closed.length) {
         html += `<h2 class="subhead goals-section-title">Encerradas e concluídas</h2>` + closed.map(r => goalCard(r, ctx)).join('');
@@ -1201,9 +1200,6 @@ function goalCard(r, ctx) {
             <span class="goal-rank">${ctx.pos + 1}ª</span>
             <button type="button" class="icon-btn" data-goal-move="${esc(g.id)}" data-dir="1" aria-label="Diminuir prioridade" ${ctx.pos === ctx.openCount - 1 ? 'disabled' : ''}>${ICON_DOWN}</button>
         </div>` : '';
-    const pin = open && ctx.openCount > MAX_HOME_GOALS
-        ? `<button type="button" class="chip chip-pin" data-goal-pin="${esc(g.id)}" aria-pressed="${g.showOnHome}">Mostrar no início</button>`
-        : '';
 
     return `
     <article class="card goal-card" data-status="${r.status}">
@@ -1219,8 +1215,6 @@ function goalCard(r, ctx) {
         <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div class="progress-fill" style="width:${pct}%"></div></div>
         ${details}
         <div class="goal-actions">
-            ${pin}
-            <span class="spacer"></span>
             <button type="button" class="btn btn-ghost btn-sm" data-goal-edit="${esc(g.id)}">Editar</button>
             <button type="button" class="btn btn-danger-ghost btn-sm" data-goal-del="${esc(g.id)}">Excluir</button>
         </div>
@@ -1254,21 +1248,6 @@ function resetGoalOrder() {
     markChanged();
     renderGoals();
     toast('Prioridade automática restaurada.');
-}
-
-function toggleGoalHome(id) {
-    const g = goals().find(x => x.id === id);
-    if (!g) return;
-    if (!g.showOnHome) {
-        const open = goalEval().results.filter(isOpenGoal);
-        if (open.filter(r => r.goal.showOnHome).length >= MAX_HOME_GOALS) {
-            toast(`Dá para mostrar no máximo ${MAX_HOME_GOALS} metas no início. Desmarque outra primeiro.`, { type: 'error' });
-            return;
-        }
-    }
-    g.showOnHome = !g.showOnHome;
-    markChanged();
-    renderGoals();
 }
 
 /** Prioridade que uma nova meta receberia com a ordem manual (meio-termo entre vizinhas). */
@@ -1387,7 +1366,7 @@ function saveGoal(e) {
     if (existing) {
         Object.assign(existing, f);
     } else {
-        const g = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), createdAt: Date.now(), showOnHome: false, ...f };
+        const g = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), createdAt: Date.now(), ...f };
         // com prioridade manual, a nova meta entra onde a regra automática a colocaria
         if (L.isManualOrder(goals())) {
             const list = openGoalOrder();
@@ -1787,11 +1766,9 @@ function bindEvents() {
         const edit = e.target.closest('[data-goal-edit]');
         const del = e.target.closest('[data-goal-del]');
         const move = e.target.closest('[data-goal-move]');
-        const pin = e.target.closest('[data-goal-pin]');
         if (edit) openGoalDialog(edit.dataset.goalEdit);
         if (del) deleteGoal(del.dataset.goalDel);
         if (move) moveGoal(move.dataset.goalMove, Number(move.dataset.dir));
-        if (pin) toggleGoalHome(pin.dataset.goalPin);
         if (e.target.closest('[data-goal-auto]')) resetGoalOrder();
     });
     $('goal-form').addEventListener('submit', saveGoal);

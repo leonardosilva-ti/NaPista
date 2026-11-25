@@ -417,6 +417,16 @@ button.item-main { padding: 0; }
 .kv dd { font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
 .howto { padding-left: 20px; display: grid; gap: 8px; color: var(--text-2); font-size: 0.92rem; }
 .version { text-align: center; color: var(--text-3); font-size: 0.8rem; margin-top: 8px; }
+.made-by {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    color: var(--text-2); font-size: 0.85rem; font-weight: 600; margin-top: 22px;
+}
+/* símbolo da Covem pintado com a cor do texto (funciona no tema claro e escuro) */
+.covem-mark {
+    width: 32px; height: 20px; flex-shrink: 0; background: currentColor;
+    -webkit-mask: url(covem.svg) no-repeat center / contain;
+    mask: url(covem.svg) no-repeat center / contain;
+}
 
 /* ===================== Login ===================== */
 .login-hero { display: flex; flex-direction: column; align-items: center; gap: 10px; }
@@ -542,8 +552,6 @@ body:not(.has-nav) .toast { bottom: calc(24px + var(--safe-b)); }
 .goal-card[data-status="expired"] .goal-status { background: var(--warn-soft); color: var(--warn); }
 .goal-card[data-status="expired"] .progress-fill { background: var(--warn); }
 .goal-actions { display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
-.goal-actions .spacer { flex: 1; }
-.chip-pin { padding: 6px 12px; font-size: 0.85rem; }
 
 .goal-card .goal-head-main { flex: 1; min-width: 0; }
 .goal-order { display: flex; flex-direction: column; align-items: center; margin: -6px 0 -6px -8px; }

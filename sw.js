@@ -1,6 +1,6 @@
 // Network-first para os arquivos do app: sempre pega a versão mais nova
 // quando há internet e usa o cache quando está offline.
-const CACHE_NAME = 'napista-v9';
+const CACHE_NAME = 'napista-v10';
 const ASSETS = [
     './',
     './index.html',
@@ -11,7 +11,12 @@ const ASSETS = [
     './logic.js',
     './plans.js',
     './manifest.json',
-    './icon.svg'
+    './icon.svg',
+    './icon-192.png',
+    './icon-512.png',
+    './icon-maskable-512.png',
+    './apple-touch-icon.png',
+    './covem.svg'
 ];
 
 self.addEventListener('install', (event) => {

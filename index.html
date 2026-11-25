@@ -11,11 +11,12 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="./manifest.json">
     <link rel="icon" type="image/svg+xml" href="./icon.svg">
-    <link rel="apple-touch-icon" href="./icon.svg">
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=2.3.3">
+    <link rel="stylesheet" href="style.css?v=2.4.0">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -55,6 +56,7 @@
                 Entrar com Google
             </button>
             <p class="fine-print">Seus dados ficam na pasta privada do app no <strong>seu</strong> Google Drive. Ninguém mais tem acesso.</p>
+            <p class="made-by"><span class="covem-mark" aria-hidden="true"></span>Um app Covem.</p>
         </section>
 
         <!-- CONFIGURAÇÃO -->
@@ -322,7 +324,8 @@
                     <button type="button" class="btn btn-danger-ghost" id="btn-wipe">Apagar todos os dados</button>
                 </div>
             </section>
-            <p class="version">Na Pista · v2.3.3</p>
+            <p class="made-by"><span class="covem-mark" aria-hidden="true"></span>Um app Covem.</p>
+            <p class="version">Na Pista · v2.4.0</p>
         </section>
     </main>
 
@@ -442,7 +445,7 @@
         <button type="button" class="toast-action" id="toast-action" hidden></button>
     </div>
 
-    <script src="app.js?v=2.3.3" type="module"></script>
+    <script src="app.js?v=2.4.0" type="module"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
