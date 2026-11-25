@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=2.1.1">
+    <link rel="stylesheet" href="style.css?v=2.3.0">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -67,15 +67,13 @@
             <form id="setup-form" novalidate>
                 <section class="card">
                     <h2 class="card-title">Meta</h2>
-                    <div class="grid-2">
-                        <label class="field">
-                            <span class="field-label">Meta líquida por mês</span>
-                            <span class="input-wrap"><span class="prefix">R$</span><input type="text" inputmode="numeric" id="setup-meta" class="money" placeholder="5.000,00" autocomplete="off"></span>
-                        </label>
-                        <label class="field">
-                            <span class="field-label">Dias de trabalho no mês</span>
-                            <span class="input-wrap"><input type="text" inputmode="numeric" id="setup-dias" class="integer" placeholder="22" maxlength="2" autocomplete="off"><span class="suffix">dias</span></span>
-                        </label>
+                    <label class="field">
+                        <span class="field-label">Meta líquida por mês</span>
+                        <span class="input-wrap"><span class="prefix">R$</span><input type="text" inputmode="numeric" id="setup-meta" class="money" placeholder="5.000,00" autocomplete="off"></span>
+                    </label>
+                    <div class="field">
+                        <span class="field-label">Dias da semana que você trabalha</span>
+                        <div class="chips chips-sm chips-days" id="setup-weekdays" role="group" aria-label="Dias de trabalho"></div>
                     </div>
                 </section>
 
@@ -207,6 +205,8 @@
                 </div>
                 <ul class="list" id="expense-list"></ul>
             </section>
+
+            <aside class="card ad-slot" hidden aria-label="Publicidade"></aside>
         </section>
 
         <!-- RELATÓRIOS -->
@@ -257,8 +257,11 @@
                 <section class="card">
                     <h2 class="card-title" id="report-list-title">Lançamentos</h2>
                     <ul class="list list-select" id="report-list"></ul>
+                    <div class="goal-more" id="report-more" hidden><button type="button" class="link-btn" id="btn-report-more">Mostrar mais</button></div>
                 </section>
             </div>
+
+            <aside class="card ad-slot" hidden aria-label="Publicidade"></aside>
         </section>
 
         <!-- METAS -->
@@ -279,6 +282,17 @@
         <!-- AJUSTES -->
         <section id="profile-screen" class="screen">
             <div class="page-head"><h1>Ajustes</h1></div>
+
+            <section class="card plan-card" id="plan-card" hidden>
+                <div class="card-head">
+                    <h2 class="card-title">Seu plano</h2>
+                    <span class="badge" id="plan-badge">Grátis</span>
+                </div>
+                <p class="muted small" id="plan-desc"></p>
+                <div class="stack">
+                    <button type="button" class="btn btn-primary" id="btn-plans">Ver planos</button>
+                </div>
+            </section>
 
             <section class="card">
                 <div class="card-head">
@@ -308,7 +322,7 @@
                     <button type="button" class="btn btn-danger-ghost" id="btn-wipe">Apagar todos os dados</button>
                 </div>
             </section>
-            <p class="version">Na Pista · v2.1.1</p>
+            <p class="version">Na Pista · v2.3.0</p>
         </section>
     </main>
 
@@ -396,6 +410,21 @@
         </div>
     </dialog>
 
+    <!-- Diálogo: planos -->
+    <dialog id="plans-dialog" class="sheet" aria-labelledby="plans-title">
+        <div class="dialog-body">
+            <h2 id="plans-title">Planos</h2>
+            <p class="plans-reason" id="plans-reason" hidden></p>
+            <div class="seg" role="tablist" aria-label="Período" id="plans-period">
+                <button type="button" role="tab" class="seg-btn active" data-period="mensal" aria-selected="true">Mensal</button>
+                <button type="button" role="tab" class="seg-btn" data-period="anual" aria-selected="false">Anual <span class="seg-save">−25%</span></button>
+            </div>
+            <div class="plan-list" id="plan-list"></div>
+            <p class="hint">Pagamento único pelo Mercado Pago (Pix, cartão ou boleto). Não renova sozinho: quando vencer, é só renovar. Pagamentos por Pix são liberados em instantes; boleto pode levar até 3 dias úteis.</p>
+            <div class="dialog-actions"><button type="button" class="btn btn-ghost" data-close>Fechar</button></div>
+        </div>
+    </dialog>
+
     <!-- Diálogo: confirmação -->
     <dialog id="confirm-dialog" class="sheet" aria-labelledby="confirm-title">
         <div class="dialog-body">
@@ -413,7 +442,7 @@
         <button type="button" class="toast-action" id="toast-action" hidden></button>
     </div>
 
-    <script src="app.js?v=2.1.1" type="module"></script>
+    <script src="app.js?v=2.3.0" type="module"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {

@@ -1,6 +1,7 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.1.1';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.1.1';
-import * as L from './logic.js?v=2.1.1';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.3.0';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.3.0';
+import * as L from './logic.js?v=2.3.0';
+import * as P from './plans.js?v=2.3.0';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -25,13 +26,17 @@ const state = {
     dayAnchor: L.startOfDay(new Date()),  // último dia escolhido (para voltar ao escopo "dia")
     reportTab: 'days',
     reportKey: null,
+    reportLimit: 5,                       // itens visíveis na lista de relatórios
     range: null,
     setupPlatforms: [],
+    setupWeekdays: [],
     setupOptions: [],
     editingExpense: null,
     reportExpenses: [],
     editingGoal: null,
-    goalWeekdays: []
+    goalWeekdays: [],
+    plansPeriod: 'mensal',
+    plansHighlight: null
 };
 
 // ═══════════════════════ Utilidades ═══════════════════════
@@ -99,6 +104,10 @@ function normalizeData(raw) {
     const data = raw && typeof raw === 'object' ? raw : {};
     data.settings = { ...L.defaultSettings(), ...(data.settings || {}) };
     if (!Array.isArray(data.settings.plataformas)) data.settings.plataformas = [];
+    // perfis antigos guardavam "dias de trabalho no mês": converte para dias da semana
+    const wd = Array.isArray(data.settings.diasSemana) ? data.settings.diasSemana.filter(d => Number.isInteger(d) && d >= 0 && d <= 6) : [];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data.settings.dataInicio || '')) data.settings.dataInicio = null;
+    data.settings.diasSemana = wd.length ? [...new Set(wd)] : (L.num(data.settings.diasTrabalhoMes) > 0 ? L.legacyWorkWeekdays(data.settings) : []);
 
     const seen = new Set();
     data.history = (Array.isArray(data.history) ? data.history : []).filter(d => {
@@ -121,6 +130,8 @@ function normalizeData(raw) {
         g && g.id && L.num(g.amount) > 0 && dateRe.test(g.startDate) && dateRe.test(g.deadline));
     data.goals.forEach(g => {
         if (!Array.isArray(g.weekdays) || !g.weekdays.length) g.weekdays = [...L.ALL_WEEKDAYS];
+        if (!Number.isFinite(g.priority)) delete g.priority;
+        g.showOnHome = g.showOnHome === true;
     });
     return data;
 }
@@ -315,6 +326,7 @@ function syncWithDrive() {
             writeCache();
             setSync('saved');
             if (!getAccountHint()) getUserEmail().then(setAccountHint).catch(() => {});
+            updatePlan();
         } catch (e) {
             console.error('Erro ao sincronizar:', e);
             const authErr = e?.name === 'AuthError' || e?.status === 401;
@@ -366,6 +378,7 @@ function showScreen(id) {
     if (id === 'reports-screen') renderReports();
     if (id === 'goals-screen') renderGoals();
     if (id === 'profile-screen') renderProfile();
+    renderAds();
 }
 
 function showLoading(message = 'Carregando…') {
@@ -418,6 +431,7 @@ function openWithData(data, fileId, dirty = false) {
     renderPlatformInputs();
     if (L.isConfigured(state.data.settings)) showScreen('dashboard-screen');
     else openSetup();
+    renderPlanUI();
 }
 
 async function handleLogin() {
@@ -442,6 +456,7 @@ async function loadUserData() {
         openWithData(data, fileId);
         lastPull = Date.now();
         getUserEmail().then(setAccountHint).catch(() => {});
+        updatePlan();
     } catch (e) {
         console.error(e);
         if (e?.name === 'AuthError' || e?.status === 401 || e?.status === 403) {
@@ -462,7 +477,8 @@ function openSetup() {
     $('btn-finish-setup').textContent = configured ? 'Salvar alterações' : 'Salvar e começar';
     $('btn-cancel-setup').hidden = !configured;
 
-    $('setup-dias').value = s.diasTrabalhoMes || '';
+    state.setupWeekdays = L.defaultWorkWeekdays(s);
+    renderWeekdayChips('setup-weekdays', state.setupWeekdays);
     $('setup-meta').value = moneyInput(L.num(s.metaLiquidaMensal));
     $('setup-pagamento-km').value = moneyInput(L.num(s.mediaPagamentoKm));
     $('setup-consumo').value = decimalInput(L.num(s.mediaConsumoL));
@@ -477,7 +493,8 @@ function openSetup() {
 
 function readSetupForm() {
     return {
-        diasTrabalhoMes: parseInt($('setup-dias').value, 10) || 0,
+        diasSemana: [...state.setupWeekdays].sort((a, b) => a - b),
+        diasTrabalhoMes: Math.round(state.setupWeekdays.length * L.WEEKS_PER_MONTH),
         metaLiquidaMensal: parseDecimal($('setup-meta').value),
         mediaPagamentoKm: parseDecimal($('setup-pagamento-km').value),
         mediaConsumoL: parseDecimal($('setup-consumo').value),
@@ -504,8 +521,10 @@ function updateSetupPreview() {
         ['Custo de combustível por km', brl(custoKm)],
         ['Lucro por km', brl(lucroKm)]
     ];
-    if (f.metaLiquidaMensal && f.diasTrabalhoMes) {
-        const metaDia = f.metaLiquidaMensal / f.diasTrabalhoMes;
+    if (f.metaLiquidaMensal && f.diasSemana.length) {
+        const diasMes = L.workDaysInMonth(f, new Date());
+        const metaDia = f.metaLiquidaMensal / diasMes;
+        rows.push([`Dias de trabalho em ${MONTHS[new Date().getMonth()].toLowerCase()}`, String(diasMes)]);
         rows.push(['Meta líquida por dia', brl(metaDia)]);
         rows.push(['Rodagem estimada por dia', `${fmt(metaDia / lucroKm, 0)} km`]);
     }
@@ -536,7 +555,7 @@ function saveSetup(e) {
     const fail = (msg, id) => { toast(msg, { type: 'error' }); if (id) $(id).focus(); };
 
     if (!(f.metaLiquidaMensal > 0)) return fail('Informe sua meta líquida mensal.', 'setup-meta');
-    if (!(f.diasTrabalhoMes >= 1 && f.diasTrabalhoMes <= 31)) return fail('Dias de trabalho devem estar entre 1 e 31.', 'setup-dias');
+    if (!f.diasSemana.length) return fail('Escolha os dias da semana em que você trabalha.');
     if (!(f.mediaPagamentoKm > 0)) return fail('Informe a média que você aceita por km.', 'setup-pagamento-km');
     if (!(f.mediaConsumoL > 0)) return fail('Informe o consumo médio do veículo.', 'setup-consumo');
     if (!(f.mediaPrecoCombustivel > 0)) return fail('Informe o preço do litro.', 'setup-preco-comb');
@@ -546,7 +565,9 @@ function saveSetup(e) {
     const wasConfigured = L.isConfigured(settings());
     // mantém a ordem das opções exibidas
     const plataformas = state.setupOptions.filter(p => state.setupPlatforms.includes(p));
-    state.data.settings = { ...settings(), ...f, plataformas };
+    // primeiro cadastro (ou depois de apagar os dados): hoje é o "dia 0"
+    const dataInicio = wasConfigured ? settings().dataInicio : L.toDateKey(todayDate());
+    state.data.settings = { ...settings(), ...f, plataformas, dataInicio };
     renderPlatformInputs();
     markChanged(0);
     toast(wasConfigured ? 'Metas atualizadas.' : 'Tudo pronto! Bom trabalho na pista.');
@@ -722,6 +743,15 @@ function renderHero(r) {
     $('hero-net').textContent = brl(r.summary.net);
     $('hero-target').textContent = brl(r.meta);
 
+    if (r.antesDoInicio) {
+        hero.dataset.state = 'done';
+        $('hero-label').textContent = 'Antes do seu início no app';
+        $('hero-value').textContent = 'Meta considerada batida';
+        $('hero-sub').textContent = `você começou em ${fullDate(settings().dataInicio)}`;
+        $('hero-target').textContent = '—';
+        return;
+    }
+
     if (r.metaAlcancada) {
         hero.dataset.state = 'done';
         $('hero-label').textContent = `Meta ${word} batida`;
@@ -748,6 +778,12 @@ function renderHero(r) {
                 ? `Último dia de trabalho do período: ${brl(r.brutoFaltante)} brutos.`
                 : `Sugestão: ${brl(r.brutoPorDia)} por dia (≈ ${fmt(r.kmPorDia, 0)} km) nos próximos ${r.diasRestantes} dias de trabalho.`;
         }
+    }
+
+    if (r.inicioParcial) {
+        const note = `Meta proporcional: os dias antes de ${shortDate(L.parseDateKey(r.inicioParcial))} (seu início) contam como batidos.`;
+        tip.textContent = tip.hidden ? note : `${tip.textContent} ${note}`;
+        tip.hidden = false;
     }
 }
 
@@ -914,17 +950,28 @@ function renderReports() {
     let selected = groups.find(g => g.key === state.reportKey) || groups[0];
     state.reportKey = selected.key;
 
+    // Mostra só os mais recentes; "Mostrar mais" libera de 5 em 5
+    const limit = state.reportLimit;
+    let total;
     if (tab === 'range') {
         // Na aba período, a lista mostra os dias do intervalo filtrado
-        $('report-list-title').textContent = `Dias no período (${selected.days.length})`;
-        $('report-list').innerHTML = [...selected.days].sort((a, b) => b.date.localeCompare(a.date)).map(day => {
+        const days = [...selected.days].sort((a, b) => b.date.localeCompare(a.date));
+        total = days.length;
+        $('report-list-title').textContent = `Dias no período (${total})`;
+        $('report-list').innerHTML = days.slice(0, limit).map(day => {
             const d = L.parseDateKey(day.date);
             return reportRow({ label: `${WEEKDAYS_SHORT[d.getDay()]}, ${shortDate(d)}`, sub: String(d.getFullYear()) }, L.summarize([day], s), false);
         }).join('');
     } else {
+        total = groups.length;
         $('report-list-title').textContent = { days: 'Dias', weeks: 'Semanas', months: 'Meses' }[tab];
-        $('report-list').innerHTML = groups.map(g => reportRow(g, L.summarize(g.days, s), true, g.key === selected.key)).join('');
+        // o item selecionado continua visível mesmo se estiver além do limite
+        const visible = groups.filter((g, i) => i < limit || g.key === selected.key);
+        $('report-list').innerHTML = visible.map(g => reportRow(g, L.summarize(g.days, s), true, g.key === selected.key)).join('');
     }
+    const hiddenCount = total - Math.min(total, limit);
+    $('report-more').hidden = hiddenCount <= 0;
+    $('btn-report-more').textContent = `Mostrar mais (${hiddenCount} ${hiddenCount === 1 ? 'restante' : 'restantes'})`;
 
     renderReportSummary(selected);
 }
@@ -991,17 +1038,17 @@ const goals = () => state.data.goals;
 const goalTitle = (g) => g.name?.trim() || `Meta de ${brl(L.num(g.amount))}`;
 const fullDate = (key) => { const d = L.parseDateKey(key); return `${shortDate(d)}/${d.getFullYear()}`; };
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-const STATUS_ORDER = { active: 0, scheduled: 1, done: 2, expired: 3 };
+const isOpenGoal = (r) => r.status === 'active' || r.status === 'scheduled';
+const MAX_HOME_GOALS = 2;
+const ICON_UP = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>';
+const ICON_DOWN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
 
-function goalResults() {
-    const s = settings();
-    const now = new Date();
-    return goals()
-        .map(g => L.goalProgress(g, s, state.data.history, now))
-        .sort((a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status])
-            || (a.status === 'done' || a.status === 'expired'
-                ? b.goal.deadline.localeCompare(a.goal.deadline)
-                : a.goal.deadline.localeCompare(b.goal.deadline)));
+const weekdaysLabel = (days) => (days.length === 7 ? 'todos os dias'
+    : days.slice().sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map(d => WEEKDAYS_SHORT[d]).join(', '));
+
+/** Metas avaliadas juntas (cascata por prioridade) + plano combinado. */
+function goalEval() {
+    return L.evaluateGoals(goals(), settings(), state.data.history, new Date());
 }
 
 function goalTodayLine(r) {
@@ -1011,10 +1058,45 @@ function goalTodayLine(r) {
     return `<p class="goal-today">Hoje faltam <strong>${brl(r.hojeFalta)}</strong> líquidos para ficar no ritmo.</p>`;
 }
 
+/** Card "para bater todas as metas". `compact` = versão da tela Início. */
+function combinedCard(c, open, compact = false) {
+    const falta = open.reduce((a, r) => a + r.falta, 0);
+    const today = !c.todayIsWork
+        ? '<p class="goal-today">Hoje não é dia de trabalho em nenhuma meta em andamento.</p>'
+        : c.hojeFalta <= 0
+            ? '<p class="goal-today ok">Ritmo de hoje cumprido para todas as metas.</p>'
+            : `<p class="goal-today">Hoje faltam <strong>${brl(c.hojeFalta)}</strong> líquidos para ficar no ritmo de todas.</p>`;
+    const extra = c.kmPorDia > 0
+        ? `<span>≈ ${brl(c.brutoPorDia)} bruto · ≈ ${fmt(c.kmPorDia, 0)} km por dia</span>` : '';
+    return `
+    <div class="goal-total${compact ? ' compact' : ''}">
+        <span class="goal-total-label">Para bater ${open.length === 1 ? 'a meta' : `as ${open.length} metas`}</span>
+        <span class="goal-total-value">${brl(c.porDia)}<small>/dia líquido</small></span>
+        <div class="goal-mini-line"><span>Falta <strong>${brl(falta)}</strong> no total</span><span>${plural(c.diasTrabalho, 'dia de trabalho', 'dias de trabalho')} até ${fullDate(c.lastDeadline)}</span></div>
+        ${extra ? `<div class="goal-mini-line">${extra}</div>` : ''}
+        ${today}
+    </div>`;
+}
+
+function goalMini(r) {
+    const pct = Math.round(r.progress * 100);
+    const sub = r.status === 'scheduled'
+        ? `Começa em ${fullDate(r.goal.startDate)}`
+        : `${brl(r.porDia)}/dia · ${plural(r.diasRestantes, 'dia', 'dias')} até ${fullDate(r.goal.deadline)}`;
+    return `
+    <div class="goal-mini">
+        <div class="goal-mini-head"><span class="goal-mini-name">${esc(goalTitle(r.goal))}</span><span class="goal-mini-pct">${pct}%</span></div>
+        <div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div>
+        <div class="goal-mini-line"><span><strong>${brl(r.net)}</strong> de ${brl(r.meta)}</span><span>${sub}</span></div>
+        ${goalTodayLine(r)}
+    </div>`;
+}
+
 function renderGoalWidget() {
     const body = $('goal-widget-body');
     if (!body || !state.data) return;
-    const list = goalResults().filter(r => r.status === 'active' || r.status === 'scheduled');
+    const { results, combined } = goalEval();
+    const list = results.filter(isOpenGoal);
 
     if (!list.length) {
         const finished = goals().length;
@@ -1025,45 +1107,54 @@ function renderGoalWidget() {
         return;
     }
 
-    const shown = list.slice(0, 2);
-    body.innerHTML = shown.map(r => {
-        const pct = Math.round(r.progress * 100);
-        const sub = r.status === 'scheduled'
-            ? `Começa em ${fullDate(r.goal.startDate)}`
-            : `${brl(r.porDia)}/dia · ${plural(r.diasRestantes, 'dia', 'dias')} até ${fullDate(r.goal.deadline)}`;
-        return `
-        <div class="goal-mini">
-            <div class="goal-mini-head"><span class="goal-mini-name">${esc(goalTitle(r.goal))}</span><span class="goal-mini-pct">${pct}%</span></div>
-            <div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div>
-            <div class="goal-mini-line"><span><strong>${brl(r.net)}</strong> de ${brl(r.meta)}</span><span>${sub}</span></div>
-            ${goalTodayLine(r)}
-        </div>`;
-    }).join('') + `<div class="goal-more"><button type="button" class="link-btn" data-goto-goals>${list.length > shown.length ? `Ver todas (${list.length})` : 'Ver detalhes'}</button></div>`;
+    let html;
+    if (list.length <= MAX_HOME_GOALS) {
+        html = list.map(goalMini).join('');
+    } else {
+        // muitas metas: card com o total + as que o usuário escolheu mostrar (até 2)
+        const pinned = list.filter(r => r.goal.showOnHome).slice(0, MAX_HOME_GOALS);
+        html = (combined ? combinedCard(combined, list, true) : '') + pinned.map(goalMini).join('');
+    }
+    body.innerHTML = html + `<div class="goal-more"><button type="button" class="link-btn" data-goto-goals>${list.length > MAX_HOME_GOALS ? `Ver todas (${list.length})` : 'Ver detalhes'}</button></div>`;
 }
 
 function renderGoals() {
     if (!state.data) return;
-    const results = goalResults();
+    const { results, combined } = goalEval();
     $('goals-empty').hidden = results.length > 0;
 
-    const open = results.filter(r => r.status === 'active' || r.status === 'scheduled');
-    const closed = results.filter(r => r.status === 'done' || r.status === 'expired');
-    let html = open.map(goalCard).join('');
+    const open = results.filter(isOpenGoal);
+    const closed = results.filter(r => !isOpenGoal(r))
+        .sort((a, b) => b.goal.deadline.localeCompare(a.goal.deadline));
+
+    let html = '';
+    if (open.length > 1 && combined) {
+        html += `<section class="card goal-total-card">${combinedCard(combined, open)}</section>`;
+    }
+    if (open.length > 1) {
+        const manual = L.isManualOrder(goals());
+        html += `
+        <div class="goal-order-note">
+            <span>${manual ? 'Prioridade escolhida por você.' : 'Prioridade automática: prazo mais próximo primeiro; prazo igual, menor valor primeiro.'} O lucro completa a 1ª meta antes de ir para a próxima.</span>
+            ${manual ? '<button type="button" class="link-btn" data-goal-auto>Voltar à automática</button>' : ''}
+        </div>`;
+    }
+    const ctx = { openCount: open.length, pinnedCount: open.filter(r => r.goal.showOnHome).length };
+    html += open.map((r, i) => goalCard(r, { ...ctx, pos: i })).join('');
     if (closed.length) {
-        html += `<h2 class="subhead goals-section-title">Encerradas e concluídas</h2>` + closed.map(goalCard).join('');
+        html += `<h2 class="subhead goals-section-title">Encerradas e concluídas</h2>` + closed.map(r => goalCard(r, ctx)).join('');
     }
     $('goals-list').innerHTML = html;
 }
 
-function goalCard(r) {
+function goalCard(r, ctx) {
     const g = r.goal;
     const pct = Math.round(r.progress * 100);
     const s = settings();
-    const workDaysLabel = g.weekdays.length === 7 ? 'todos os dias'
-        : g.weekdays.slice().sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map(d => WEEKDAYS_SHORT[d]).join(', ');
+    const open = isOpenGoal(r);
 
     let details = '';
-    if (r.status === 'active' || r.status === 'scheduled') {
+    if (open) {
         const lucroOk = r.kmPorDia > 0;
         details = `
             <div class="stat-grid">
@@ -1075,17 +1166,29 @@ function goalCard(r) {
             </div>
             ${r.status === 'scheduled' ? `<p class="goal-status">Começa a contar em ${fullDate(g.startDate)}.</p>` : goalTodayLine(r)}`;
     } else if (r.status === 'done') {
-        details = `<p class="goal-status">Meta batida!${r.excedente > 0 ? ` Você passou ${brl(r.excedente)} do objetivo.` : ''}</p>`;
+        details = '<p class="goal-status">Meta batida!</p>';
     } else {
         details = `<p class="goal-status">Prazo encerrado. Faltaram ${brl(r.falta)} (${pct}% concluído).</p>`;
     }
 
+    // prioridade (setas) e "mostrar no início" só fazem sentido com várias metas em aberto
+    const order = open && ctx.openCount > 1 ? `
+        <div class="goal-order" role="group" aria-label="Prioridade">
+            <button type="button" class="icon-btn" data-goal-move="${esc(g.id)}" data-dir="-1" aria-label="Aumentar prioridade" ${ctx.pos === 0 ? 'disabled' : ''}>${ICON_UP}</button>
+            <span class="goal-rank">${ctx.pos + 1}ª</span>
+            <button type="button" class="icon-btn" data-goal-move="${esc(g.id)}" data-dir="1" aria-label="Diminuir prioridade" ${ctx.pos === ctx.openCount - 1 ? 'disabled' : ''}>${ICON_DOWN}</button>
+        </div>` : '';
+    const pin = open && ctx.openCount > MAX_HOME_GOALS
+        ? `<button type="button" class="chip chip-pin" data-goal-pin="${esc(g.id)}" aria-pressed="${g.showOnHome}">Mostrar no início</button>`
+        : '';
+
     return `
     <article class="card goal-card" data-status="${r.status}">
         <div class="goal-head">
-            <div>
+            ${order}
+            <div class="goal-head-main">
                 <h2 class="goal-name">${esc(goalTitle(g))}</h2>
-                <p class="goal-dates">${fullDate(g.startDate)} até ${fullDate(g.deadline)} · ${esc(workDaysLabel)}</p>
+                <p class="goal-dates">${fullDate(g.startDate)} até ${fullDate(g.deadline)} · ${esc(weekdaysLabel(g.weekdays))}</p>
             </div>
             <span class="badge">${pct}%</span>
         </div>
@@ -1093,20 +1196,92 @@ function goalCard(r) {
         <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div class="progress-fill" style="width:${pct}%"></div></div>
         ${details}
         <div class="goal-actions">
+            ${pin}
+            <span class="spacer"></span>
             <button type="button" class="btn btn-ghost btn-sm" data-goal-edit="${esc(g.id)}">Editar</button>
             <button type="button" class="btn btn-danger-ghost btn-sm" data-goal-del="${esc(g.id)}">Excluir</button>
         </div>
     </article>`;
 }
 
-function renderGoalWeekdays() {
+/** Metas ainda no prazo, na ordem de prioridade atual. */
+const openGoalOrder = () => {
+    const key = L.toDateKey(todayDate());
+    return L.orderGoals(goals()).filter(g => g.deadline >= key);
+};
+const savePriorities = (list) => list.forEach((g, i) => { g.priority = i; });
+
+function moveGoal(id, dir) {
+    const { results } = goalEval();
+    const shown = results.filter(isOpenGoal).map(r => r.goal);
+    const i = shown.findIndex(g => g.id === id);
+    const j = i + dir;
+    if (i === -1 || j < 0 || j >= shown.length) return;
+    const list = openGoalOrder();
+    const a = list.indexOf(shown[i]);
+    const b = list.indexOf(shown[j]);
+    [list[a], list[b]] = [list[b], list[a]];
+    savePriorities(list);
+    markChanged();
+    renderGoals();
+}
+
+function resetGoalOrder() {
+    goals().forEach(g => { delete g.priority; });
+    markChanged();
+    renderGoals();
+    toast('Prioridade automática restaurada.');
+}
+
+function toggleGoalHome(id) {
+    const g = goals().find(x => x.id === id);
+    if (!g) return;
+    if (!g.showOnHome) {
+        const open = goalEval().results.filter(isOpenGoal);
+        if (open.filter(r => r.goal.showOnHome).length >= MAX_HOME_GOALS) {
+            toast(`Dá para mostrar no máximo ${MAX_HOME_GOALS} metas no início. Desmarque outra primeiro.`, { type: 'error' });
+            return;
+        }
+    }
+    g.showOnHome = !g.showOnHome;
+    markChanged();
+    renderGoals();
+}
+
+/** Prioridade que uma nova meta receberia com a ordem manual (meio-termo entre vizinhas). */
+function insertionPriority(others, draft) {
+    const key = L.toDateKey(todayDate());
+    const list = L.orderGoals(others).filter(g => g.deadline >= key);
+    const at = list.findIndex(x => L.goalAutoCompare(draft, x) < 0);
+    if (at === -1) return list.length ? (list[list.length - 1].priority ?? list.length) + 1 : 0;
+    const next = list[at].priority ?? at;
+    const prev = at > 0 ? (list[at - 1].priority ?? at - 1) : next - 1;
+    return (prev + next) / 2;
+}
+
+function renderWeekdayChips(containerId, selected) {
     // Exibe de segunda a domingo
-    $('goal-weekdays').innerHTML = [1, 2, 3, 4, 5, 6, 0].map(d => `
-        <button type="button" class="chip" data-weekday="${d}" aria-pressed="${state.goalWeekdays.includes(d)}" aria-label="${WEEKDAYS[d]}">${WEEKDAYS_SHORT[d]}</button>
+    $(containerId).innerHTML = [1, 2, 3, 4, 5, 6, 0].map(d => `
+        <button type="button" class="chip" data-weekday="${d}" aria-pressed="${selected.includes(d)}" aria-label="${WEEKDAYS[d]}">${WEEKDAYS_SHORT[d]}</button>
     `).join('');
 }
 
+/** Liga/desliga o dia clicado na lista `list`. Retorna true se algo mudou. */
+function toggleWeekday(e, list) {
+    const chip = e.target.closest('[data-weekday]');
+    if (!chip) return false;
+    const d = Number(chip.dataset.weekday);
+    const i = list.indexOf(d);
+    if (i === -1) list.push(d); else list.splice(i, 1);
+    chip.setAttribute('aria-pressed', i === -1);
+    return true;
+}
+
 function openGoalDialog(id = null) {
+    if (!id && !P.can.createGoals()) {
+        openPlans('medio', 'Criar novas metas faz parte do plano Médio. As metas que você já tem continuam funcionando.');
+        return;
+    }
     const g = id ? goals().find(x => x.id === id) : null;
     const today = todayDate();
     state.editingGoal = g ? g.id : null;
@@ -1117,7 +1292,7 @@ function openGoalDialog(id = null) {
     $('goal-start').value = g?.startDate || L.toDateKey(today);
     $('goal-deadline').value = g?.deadline || L.toDateKey(L.getMonthRange(today).end);
     state.goalWeekdays = g ? [...g.weekdays] : L.defaultWorkWeekdays(settings());
-    renderGoalWeekdays();
+    renderWeekdayChips('goal-weekdays', state.goalWeekdays);
     updateGoalPreview();
     $('goal-dialog').showModal();
     if (!g) setTimeout(() => $('goal-amount').focus(), 50);
@@ -1151,15 +1326,25 @@ function updateGoalPreview() {
         return;
     }
 
-    const r = L.goalProgress(f, settings(), state.data.history);
+    // simula a meta junto com as outras, para considerar a divisão do lucro em cascata
+    const draft = { ...(goals().find(g => g.id === state.editingGoal) || {}), ...f, id: state.editingGoal || '__draft__' };
+    const others = goals().filter(g => g.id !== draft.id);
+    if (!state.editingGoal && L.isManualOrder(others)) draft.priority = insertionPriority(others, draft);
+    const { results, combined } = L.evaluateGoals([...others, draft], settings(), state.data.history, new Date());
+    const r = results.find(x => x.goal.id === draft.id);
     if (r.status === 'done') {
         el.innerHTML = `<div class="preview-row"><span>Você já fez ${brl(r.net)} nesse período</span><strong>Meta batida</strong></div>`;
         return;
     }
     const rows = [['Você precisa fazer por dia', `${brl(r.porDia)} líquidos`]];
+    const openCount = results.filter(isOpenGoal).length;
     if (r.brutoPorDia > 0) rows.push(['Faturamento bruto por dia', `≈ ${brl(r.brutoPorDia)}`], ['Rodagem por dia', `≈ ${fmt(r.kmPorDia, 0)} km`]);
     rows.push(['Dias de trabalho até a data', String(r.diasRestantes)]);
-    if (r.net !== 0) rows.push(['Já feito no período', brl(r.net)]);
+    if (r.net !== 0) rows.push(['Já conta para esta meta', brl(r.net)]);
+    if (openCount > 1) {
+        rows.push(['Prioridade', `${results.filter(isOpenGoal).indexOf(r) + 1}ª de ${openCount}`]);
+        if (combined) rows.push(['Para bater todas as metas', `${brl(combined.porDia)}/dia`]);
+    }
     el.innerHTML = rows.map(([k, v]) => `<div class="preview-row"><span>${k}</span><strong>${v}</strong></div>`).join('');
 }
 
@@ -1178,7 +1363,15 @@ function saveGoal(e) {
     if (existing) {
         Object.assign(existing, f);
     } else {
-        goals().push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), createdAt: Date.now(), ...f });
+        const g = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), createdAt: Date.now(), showOnHome: false, ...f };
+        // com prioridade manual, a nova meta entra onde a regra automática a colocaria
+        if (L.isManualOrder(goals())) {
+            const list = openGoalOrder();
+            const at = list.findIndex(x => L.goalAutoCompare(g, x) < 0);
+            list.splice(at === -1 ? list.length : at, 0, g);
+            savePriorities(list);
+        }
+        goals().push(g);
     }
     $('goal-dialog').close();
     markChanged(0);
@@ -1219,13 +1412,14 @@ function renderProfile() {
     const lucroKm = L.num(s.mediaPagamentoKm) - L.num(s.mediaPrecoCombustivel) / L.num(s.mediaConsumoL);
     const rows = [
         ['Meta líquida mensal', brl(L.num(s.metaLiquidaMensal))],
-        ['Dias de trabalho', `${s.diasTrabalhoMes} dias`],
-        ['Meta líquida por dia', brl(L.num(s.metaLiquidaMensal) / L.num(s.diasTrabalhoMes))],
+        ['Dias de trabalho', weekdaysLabel(L.workWeekdays(s))],
+        ['Meta líquida por dia', brl(L.dailyTarget(s, new Date()))],
         ['Ganho médio por km', brl(L.num(s.mediaPagamentoKm))],
         ['Consumo médio', `${fmt(L.num(s.mediaConsumoL))} km/L`],
         ['Preço do litro', brl(L.num(s.mediaPrecoCombustivel))],
         ['Lucro estimado por km', brl(lucroKm)]
     ];
+    if (s.dataInicio) rows.push(['Início no app', fullDate(s.dataInicio)]);
     $('profile-settings').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
     $('profile-platforms').innerHTML = s.plataformas.map(p => `<span class="chip"><span class="plat-dot" style="--c:${platformColor(p)}"></span>${esc(p)}</span>`).join('');
 }
@@ -1253,6 +1447,7 @@ async function handleLogout() {
         if (!ok) return;
     }
     logout();
+    P.clearPlan();
     clearCache();
     resetSync();
     state.data = null;
@@ -1293,6 +1488,187 @@ async function handleWipe() {
     }
 }
 
+// ═══════════════════════ Planos e anúncios ═══════════════════════
+const PLAN_FEATURES = {
+    free: ['Lançamento diário de ganhos, km e gastos', 'Meta mensal definida no cadastro', 'Relatórios por dia, semana e mês', 'Com anúncios'],
+    semanuncios: ['Tudo do plano Grátis', 'Sem anúncios'],
+    medio: ['Tudo do plano Sem anúncios', 'Criar metas com prazo (IPVA, pneus, férias…)'],
+    completo: ['Tudo do plano Médio', 'Controle financeiro completo: despesas da casa e do carro e para onde vai o que você ganha']
+};
+
+/** Busca o plano na API (sem abrir popup) e atualiza a tela se mudou. */
+function updatePlan() {
+    return P.refreshPlan()
+        .then(changed => { if (changed) renderPlanUI(); return changed; })
+        .catch(e => { console.error('Plano:', e); return false; });
+}
+
+function renderPlanUI() {
+    renderAds();
+    renderPlanCard();
+    if ($('plans-dialog').open) renderPlanList();
+}
+
+function renderPlanCard() {
+    const card = $('plan-card');
+    card.hidden = !P.billingEnabled();
+    if (card.hidden) return;
+    const plan = P.currentPlan();
+    const exp = P.planExpiresAt();
+    $('plan-badge').textContent = P.planName(plan);
+    $('plan-badge').classList.toggle('badge-brand', plan !== 'free');
+    if (plan === 'free') {
+        $('plan-desc').textContent = 'Com anúncios. Assine para remover os anúncios e criar metas com prazo.';
+        $('btn-plans').textContent = 'Ver planos';
+    } else {
+        const days = Math.ceil((exp - Date.now()) / 86400000);
+        const until = `Válido até ${fullDate(L.toDateKey(new Date(exp)))}.`;
+        $('plan-desc').textContent = days <= 5 ? `${until} Vence em ${plural(days, 'dia', 'dias')}: renove para não perder o acesso.` : until;
+        $('btn-plans').textContent = 'Renovar ou mudar de plano';
+    }
+}
+
+let adsenseLoaded = false;
+function loadAdsense() {
+    if (adsenseLoaded) return;
+    adsenseLoaded = true;
+    const s = document.createElement('script');
+    s.async = true;
+    s.crossOrigin = 'anonymous';
+    s.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(P.ADSENSE.client)}`;
+    document.head.appendChild(s);
+}
+
+const HOUSE_AD = `
+    <span class="ad-label">Anúncio</span>
+    <div class="ad-house">
+        <div><strong>Use o Na Pista sem anúncios</strong><span class="muted small">Por apenas R$ 4,90 por mês.</span></div>
+        <button type="button" class="btn btn-soft btn-sm" data-open-plans="semanuncios">Remover</button>
+    </div>`;
+
+/** Mostra anúncios só no plano Grátis; preenche apenas os espaços da tela visível. */
+function renderAds() {
+    const show = P.billingEnabled() && !P.can.noAds();
+    document.querySelectorAll('.ad-slot').forEach(el => {
+        el.hidden = !show;
+        if (!show) { el.innerHTML = ''; delete el.dataset.filled; return; }
+        if (el.dataset.filled || !el.closest('.screen.active')) return;
+        el.dataset.filled = '1';
+        if (P.ADSENSE.client && P.ADSENSE.slot) {
+            loadAdsense();
+            el.innerHTML = `<span class="ad-label">Publicidade</span>
+                <ins class="adsbygoogle" style="display:block" data-ad-client="${esc(P.ADSENSE.client)}" data-ad-slot="${esc(P.ADSENSE.slot)}" data-ad-format="auto" data-full-width-responsive="true"></ins>
+                <button type="button" class="link-btn ad-remove" data-open-plans="semanuncios">Remover anúncios</button>`;
+            try { (window.adsbygoogle = window.adsbygoogle || []).push({}); } catch (e) { console.error(e); }
+        } else {
+            el.innerHTML = HOUSE_AD;
+        }
+    });
+}
+
+function openPlans(highlight = null, reason = '') {
+    if (!P.billingEnabled()) return;
+    state.plansHighlight = highlight;
+    $('plans-reason').textContent = reason;
+    $('plans-reason').hidden = !reason;
+    renderPlanList();
+    $('plans-dialog').showModal();
+    updatePlan(); // confere se algo mudou (ex.: Pix pago há pouco)
+}
+
+function setPlansPeriod(period) {
+    state.plansPeriod = period;
+    document.querySelectorAll('#plans-period .seg-btn').forEach(b => {
+        const on = b.dataset.period === period;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-selected', String(on));
+    });
+    renderPlanList();
+}
+
+function renderPlanList() {
+    const cat = P.catalog();
+    const cur = P.currentPlan();
+    const curRank = cur === 'free' ? 0 : cat[cur]?.rank || 0;
+    const period = state.plansPeriod;
+    const ids = ['free', ...Object.keys(cat).sort((a, b) => cat[a].rank - cat[b].rank)];
+
+    $('plan-list').innerHTML = ids.map(id => {
+        const p = id === 'free' ? { name: 'Grátis', rank: 0, available: true } : cat[id];
+        const price = p.periods?.[period];
+        const isCurrent = id === cur;
+        let priceHtml = '<span class="plan-price">R$ 0</span>';
+        if (price) {
+            const per = period === 'anual' ? '/ano' : '/mês';
+            const monthly = period === 'anual' ? `<span class="plan-eq">equivale a ${brl(price.amount / 12)}/mês</span>` : '';
+            priceHtml = `<span class="plan-price">${brl(price.amount)}<small>${per}</small></span>${monthly}`;
+        }
+        let action = '';
+        if (id === 'free') action = '';
+        else if (!p.available) action = '<button type="button" class="btn btn-ghost btn-sm" disabled>Em breve</button>';
+        else if (p.rank < curRank) action = '<span class="muted small">Incluído no seu plano</span>';
+        else action = `<button type="button" class="btn ${isCurrent ? 'btn-soft' : 'btn-primary'} btn-sm" data-buy="${id}">${isCurrent ? 'Renovar' : 'Assinar'}</button>`;
+
+        const classes = ['plan-item', isCurrent && 'is-current', state.plansHighlight === id && 'is-highlight'].filter(Boolean).join(' ');
+        return `<article class="${classes}">
+            <header class="plan-head">
+                <h3>${esc(p.name)}${isCurrent ? ' <span class="badge badge-brand">Atual</span>' : ''}</h3>
+                <div class="plan-pricing">${priceHtml}</div>
+            </header>
+            <ul class="plan-features">${(PLAN_FEATURES[id] || []).map(f => `<li>${esc(f)}</li>`).join('')}</ul>
+            ${action ? `<div class="plan-action">${action}</div>` : ''}
+        </article>`;
+    }).join('');
+}
+
+async function buyPlan(btn) {
+    if (!navigator.onLine) return toast('Sem internet. Conecte-se para assinar.', { type: 'error' });
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Abrindo…';
+    try {
+        await P.startCheckout(btn.dataset.buy, state.plansPeriod); // redireciona para o Mercado Pago
+    } catch (e) {
+        console.error(e);
+        if (e?.type !== 'popup_closed') toast(e?.message || 'Não foi possível abrir o pagamento.', { type: 'error' });
+        btn.disabled = false;
+        btn.textContent = label;
+    }
+}
+
+/** Volta do Mercado Pago com ?pagamento=ok|pendente|falhou. */
+function handlePaymentReturn() {
+    const params = new URLSearchParams(location.search);
+    const status = params.get('pagamento');
+    if (!status) return;
+    // limpa os parâmetros que o Mercado Pago adiciona ao endereço
+    history.replaceState(null, '', location.pathname);
+
+    if (status === 'falhou') {
+        toast('Pagamento não concluído. Nenhum valor foi cobrado.', { type: 'error', duration: 6000 });
+        return;
+    }
+    toast(status === 'ok' ? 'Pagamento recebido! Liberando seu plano…' : 'Pagamento em processamento. Assim que for confirmado, seu plano é liberado.', { duration: 6000 });
+
+    const before = P.currentPlan() + P.planExpiresAt();
+    let tries = 0;
+    const poll = async () => {
+        tries++;
+        if (!hasValidToken()) {
+            if (tries < 10) return setTimeout(poll, 3000); // aguarda o login carregar
+            toast('Toque em "Sincronizar" no topo para atualizar seu plano.', { duration: 6000 });
+            return;
+        }
+        await updatePlan();
+        if (P.currentPlan() + P.planExpiresAt() !== before) {
+            toast(`Plano ${P.planName(P.currentPlan())} liberado. Obrigado!`, { duration: 5000 });
+        } else if (tries < (status === 'ok' ? 15 : 6)) {
+            setTimeout(poll, 4000);
+        }
+    };
+    setTimeout(poll, 1500);
+}
+
 // ═══════════════════════ Eventos (registrados uma única vez) ═══════════════════════
 function bindEvents() {
     // Máscaras e lançamentos do dia (delegação: funciona para inputs criados dinamicamente)
@@ -1309,6 +1685,18 @@ function bindEvents() {
 
     $('btn-login').addEventListener('click', handleLogin);
 
+    // Planos
+    $('btn-plans').addEventListener('click', () => openPlans());
+    document.querySelectorAll('#plans-period .seg-btn').forEach(b => b.addEventListener('click', () => setPlansPeriod(b.dataset.period)));
+    $('plan-list').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-buy]');
+        if (btn) buyPlan(btn);
+    });
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-open-plans]');
+        if (btn) openPlans(btn.dataset.openPlans);
+    });
+
     // Setup
     $('setup-form').addEventListener('submit', saveSetup);
     $('btn-cancel-setup').addEventListener('click', () => showScreen('profile-screen'));
@@ -1323,6 +1711,10 @@ function bindEvents() {
         const i = state.setupPlatforms.indexOf(p);
         if (i === -1) state.setupPlatforms.push(p); else state.setupPlatforms.splice(i, 1);
         chip.setAttribute('aria-pressed', i === -1);
+    });
+
+    $('setup-weekdays').addEventListener('click', (e) => {
+        if (toggleWeekday(e, state.setupWeekdays)) updateSetupPreview();
     });
 
     // Navegação inferior
@@ -1370,21 +1762,20 @@ function bindEvents() {
     $('goals-list').addEventListener('click', (e) => {
         const edit = e.target.closest('[data-goal-edit]');
         const del = e.target.closest('[data-goal-del]');
+        const move = e.target.closest('[data-goal-move]');
+        const pin = e.target.closest('[data-goal-pin]');
         if (edit) openGoalDialog(edit.dataset.goalEdit);
         if (del) deleteGoal(del.dataset.goalDel);
+        if (move) moveGoal(move.dataset.goalMove, Number(move.dataset.dir));
+        if (pin) toggleGoalHome(pin.dataset.goalPin);
+        if (e.target.closest('[data-goal-auto]')) resetGoalOrder();
     });
     $('goal-form').addEventListener('submit', saveGoal);
     $('goal-form').addEventListener('change', (e) => {
         if (e.target.type === 'date') updateGoalPreview();
     });
     $('goal-weekdays').addEventListener('click', (e) => {
-        const chip = e.target.closest('[data-weekday]');
-        if (!chip) return;
-        const d = Number(chip.dataset.weekday);
-        const i = state.goalWeekdays.indexOf(d);
-        if (i === -1) state.goalWeekdays.push(d); else state.goalWeekdays.splice(i, 1);
-        chip.setAttribute('aria-pressed', i === -1);
-        updateGoalPreview();
+        if (toggleWeekday(e, state.goalWeekdays)) updateGoalPreview();
     });
 
     // Relatórios
@@ -1392,6 +1783,7 @@ function bindEvents() {
         btn.addEventListener('click', () => {
             state.reportTab = btn.dataset.tab;
             state.reportKey = null;
+            state.reportLimit = 5;
             renderReports();
         });
     });
@@ -1409,9 +1801,14 @@ function bindEvents() {
         if (!start || !end) { toast('Escolha as duas datas.', { type: 'error' }); return; }
         if (start > end) [start, end] = [end, start];
         state.range = { start, end };
+        state.reportLimit = 5;
         renderReports();
     });
     $('rep-exp-btn').addEventListener('click', openReportExpenses);
+    $('btn-report-more').addEventListener('click', () => {
+        state.reportLimit += 5;
+        renderReports();
+    });
 
     // Ajustes
     $('btn-edit-goals').addEventListener('click', openSetup);
@@ -1462,3 +1859,4 @@ window.addEventListener('unhandledrejection', (e) => console.error('Promise reje
 
 bindEvents();
 boot();
+handlePaymentReturn();

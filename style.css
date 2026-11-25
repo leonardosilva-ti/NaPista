@@ -541,7 +541,27 @@ body:not(.has-nav) .toast { bottom: calc(24px + var(--safe-b)); }
 .goal-card[data-status="done"] .badge { background: var(--brand-soft); color: var(--brand-text); }
 .goal-card[data-status="expired"] .goal-status { background: var(--warn-soft); color: var(--warn); }
 .goal-card[data-status="expired"] .progress-fill { background: var(--warn); }
-.goal-actions { display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end; }
+.goal-actions { display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
+.goal-actions .spacer { flex: 1; }
+.chip-pin { padding: 6px 12px; font-size: 0.85rem; }
+
+.goal-card .goal-head-main { flex: 1; min-width: 0; }
+.goal-order { display: flex; flex-direction: column; align-items: center; margin: -6px 0 -6px -8px; }
+.goal-order .icon-btn { width: 36px; height: 30px; border-radius: 8px; }
+.goal-order .icon-btn:disabled { opacity: 0.25; pointer-events: none; }
+.goal-rank { font-size: 0.78rem; font-weight: 700; color: var(--brand-text); font-variant-numeric: tabular-nums; line-height: 1; }
+.goal-order-note {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+    font-size: 0.84rem; color: var(--text-2); margin: 0 2px 12px;
+}
+
+.goal-total { display: grid; gap: 4px; }
+.goal-total-label { font-size: 0.84rem; font-weight: 600; color: var(--text-2); }
+.goal-total-value { font-size: 1.9rem; font-weight: 800; letter-spacing: -0.02em; color: var(--brand-text); font-variant-numeric: tabular-nums; }
+.goal-total-value small { font-size: 0.9rem; font-weight: 600; color: var(--text-2); margin-left: 4px; letter-spacing: 0; }
+.goal-total.compact .goal-total-value { font-size: 1.5rem; }
+.goal-total-card { border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }
+.goal-total + .goal-mini { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
 .goal-actions .btn-danger-ghost { width: auto; }
 .goals-section-title { margin: 22px 0 10px; }
 
@@ -550,3 +570,34 @@ body:not(.has-nav) .toast { bottom: calc(24px + var(--safe-b)); }
 .chips-days .chip[aria-pressed="true"]::before { content: none; }
 
 .bottom-nav .nav-item .ico { width: 48px; padding: 3px 12px; }
+
+/* ===================== Planos e anúncios ===================== */
+.badge-brand { background: var(--brand-soft); color: var(--brand-text); }
+.seg-save { font-size: 0.72rem; color: var(--brand-text); margin-left: 4px; }
+.plans-reason {
+    background: var(--info-soft); color: var(--text); border-radius: var(--radius-sm);
+    padding: 10px 12px; font-size: 0.9rem; margin-bottom: 12px;
+}
+.plan-list { display: flex; flex-direction: column; gap: 10px; }
+.plan-item {
+    border: 1px solid var(--border); border-radius: 14px; padding: 14px;
+    background: var(--surface-2);
+}
+.plan-item.is-current { border-color: var(--brand); }
+.plan-item.is-highlight { border-color: var(--info); box-shadow: 0 0 0 3px var(--info-soft); }
+.plan-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.plan-head h3 { font-size: 1.02rem; font-weight: 700; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.plan-pricing { display: flex; flex-direction: column; align-items: flex-end; text-align: right; }
+.plan-price { font-weight: 800; font-size: 1.1rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.plan-price small { font-weight: 500; font-size: 0.78rem; color: var(--text-2); margin-left: 2px; }
+.plan-eq { font-size: 0.75rem; color: var(--text-3); }
+.plan-features { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 0.88rem; color: var(--text-2); }
+.plan-features li::before { content: '✓'; color: var(--brand-text); font-weight: 700; margin-right: 8px; }
+.plan-action { display: flex; justify-content: flex-end; margin-top: 12px; }
+
+.ad-slot { padding: 12px 14px; }
+.ad-label { display: block; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-3); margin-bottom: 6px; }
+.ad-house { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ad-house strong { display: block; font-size: 0.95rem; }
+.ad-house .btn { flex-shrink: 0; }
+.ad-remove { display: block; margin: 6px 0 0 auto; }
