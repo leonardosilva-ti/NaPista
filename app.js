@@ -1,7 +1,7 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.3.2';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.3.2';
-import * as L from './logic.js?v=2.3.2';
-import * as P from './plans.js?v=2.3.2';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.3.3';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.3.3';
+import * as L from './logic.js?v=2.3.3';
+import * as P from './plans.js?v=2.3.3';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -781,7 +781,7 @@ function renderHero(r) {
     }
 
     if (r.inicioParcial) {
-        const note = `Meta proporcional: os dias antes de ${shortDate(L.parseDateKey(r.inicioParcial))} (seu início) contam como batidos.`;
+        const note = `Meta proporcional: os dias antes de ${shortDate(L.parseDateKey(r.inicioParcial))} (seu início) sem lançamentos contam como batidos.`;
         tip.textContent = tip.hidden ? note : `${tip.textContent} ${note}`;
         tip.hidden = false;
     }

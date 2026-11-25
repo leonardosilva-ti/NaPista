@@ -173,17 +173,27 @@ export function calculateTargets(scope, s, history, anchor, today = new Date()) 
         : num(s.metaLiquidaMensal);
 
     // "Dia 0": os dias antes do início no app contam como meta batida, sem
-    // lançar nada no histórico. Se o início cai no meio do período, a meta
-    // fica proporcional aos dias de trabalho a partir dele.
+    // lançar nada no histórico. Se o usuário lançou algum desses dias, ele
+    // conta normalmente. A meta do período fica proporcional aos dias que contam.
     const inicio = typeof s.dataInicio === 'string' ? s.dataInicio : null;
-    let meta = metaCheia, inicioParcial = null;
-    const antesDoInicio = !!inicio && inicio > endKey;
-    if (antesDoInicio) {
-        meta = 0;
-    } else if (inicio && inicio > startKey) {
-        const total = countWorkDays(start, end, weekdays);
-        if (total > 0) meta = metaCheia * countWorkDays(parseDateKey(inicio), end, weekdays) / total;
-        inicioParcial = inicio;
+    let meta = metaCheia, inicioParcial = null, antesDoInicio = false;
+    if (inicio && inicio > startKey) {
+        const lancados = new Set(days.map(d => d.date));
+        let total = 0, contam = 0, dispensados = 0;
+        for (let d = start; d <= end; d = addDays(d, 1)) {
+            const k = toDateKey(d);
+            const trabalho = weekdays.includes(d.getDay());
+            if (trabalho) total++;
+            if (k >= inicio ? trabalho : lancados.has(k)) contam++;
+            else if (trabalho && k < inicio) dispensados++;
+        }
+        if (contam === 0) {
+            antesDoInicio = true;
+            meta = 0;
+        } else if (scope !== 'day' && total > 0) {
+            meta = metaCheia * Math.min(contam, total) / total;
+        }
+        if (dispensados > 0 && !antesDoInicio) inicioParcial = inicio;
     }
 
     const status = endKey < todayKey ? 'past' : startKey > todayKey ? 'future' : 'current';
