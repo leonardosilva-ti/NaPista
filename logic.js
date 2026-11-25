@@ -311,25 +311,45 @@ export function orderGoals(goals, today = new Date()) {
 /**
  * Distribui o lucro líquido de cada dia entre as metas, em cascata: a primeira
  * meta da ordem recebe o lucro dos dias do seu período até completar; o que
- * sobra fica para as próximas. Retorna Map(id → valor recebido).
+ * sobra fica para as próximas. Retorna Map(id → líquido recebido); o
+ * faturamento bruto correspondente (proporcional ao líquido usado de cada
+ * dia) fica em `.gross`, Map(id → bruto).
  */
 export function allocateGoals(order, history, s, skipKey = null) {
     const avail = new Map();
-    history.forEach(d => { if (d.date !== skipKey) avail.set(d.date, dayNet(d, s)); });
+    const availGross = new Map();
+    history.forEach(d => {
+        if (d.date === skipKey) return;
+        avail.set(d.date, dayNet(d, s));
+        availGross.set(d.date, dayGross(d));
+    });
     const keys = [...avail.keys()].sort();
     const out = new Map();
+    out.gross = new Map();
     for (const g of order) {
         const meta = num(g.amount);
-        let got = 0;
+        let got = 0, gross = 0;
         for (const k of keys) {
             if (k < g.startDate) continue;
             if (k > g.deadline || got >= meta) break;
             const a = avail.get(k);
-            if (!a) continue;
-            if (got + a <= meta) { got += a; avail.set(k, 0); }
-            else { avail.set(k, a - (meta - got)); got = meta; }
+            if (!a && !availGross.get(k)) continue;
+            if (got + a <= meta) {
+                got += a;
+                gross += availGross.get(k);
+                avail.set(k, 0);
+                availGross.set(k, 0);
+            } else {
+                const used = meta - got;
+                const part = availGross.get(k) * (used / a);
+                avail.set(k, a - used);
+                availGross.set(k, availGross.get(k) - part);
+                gross += part;
+                got = meta;
+            }
         }
         out.set(g.id, got);
+        out.gross.set(g.id, gross);
     }
     return out;
 }
@@ -351,7 +371,9 @@ export function goalProgress(goal, s, history, today = new Date(), alloc = null)
 
     const days = filterRange(history, goal.startDate, goal.deadline);
     const todayDay = days.find(d => d.date === todayKey);
-    const net = alloc ? alloc.net : summarize(days, s).net;
+    const sum = alloc ? null : summarize(days, s);
+    const net = alloc ? alloc.net : sum.net;
+    const gross = alloc ? alloc.gross : sum.gross;
     const falta = meta - net;
     const status = falta <= 0.004 ? 'done'
         : todayKey > goal.deadline ? 'expired'
@@ -359,7 +381,7 @@ export function goalProgress(goal, s, history, today = new Date(), alloc = null)
         : 'active';
 
     const res = {
-        goal, status, meta, net,
+        goal, status, meta, net, gross,
         progress: meta > 0 ? Math.max(0, Math.min(1, net / meta)) : 0,
         falta: Math.max(0, falta),
         totalWorkDays: countWorkDays(start, end, weekdays),
@@ -476,7 +498,7 @@ export function evaluateGoals(goals, s, history, today = new Date()) {
     const after = allocateGoals(order, history, s);
     const before = allocateGoals(order, history, s, tk);
     const results = order.map((g, i) => ({
-        ...goalProgress(g, s, history, t, { net: after.get(g.id) || 0, netBefore: before.get(g.id) || 0 }),
+        ...goalProgress(g, s, history, t, { net: after.get(g.id) || 0, gross: after.gross.get(g.id) || 0, netBefore: before.get(g.id) || 0 }),
         rank: i
     }));
 

@@ -1,7 +1,7 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.3.1';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.3.1';
-import * as L from './logic.js?v=2.3.1';
-import * as P from './plans.js?v=2.3.1';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.3.2';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.3.2';
+import * as L from './logic.js?v=2.3.2';
+import * as P from './plans.js?v=2.3.2';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -1092,24 +1092,25 @@ function combinedCard(c, open, compact = false) {
     </div>`;
 }
 
-function goalMini(r) {
-    const pct = Math.round(r.progress * 100);
-    const sub = r.status === 'scheduled'
-        ? `Começa em ${fullDate(r.goal.startDate)}`
-        : `${brl(r.brutoPorDia > 0 ? r.brutoPorDia : r.porDia)}/dia ${r.brutoPorDia > 0 ? 'bruto' : 'líquido'} · ${plural(r.diasRestantes, 'dia', 'dias')} até ${fullDate(r.goal.deadline)}`;
+/** Linha enxuta da tela Início: barra, bruto já feito e quanto falta (bruto estimado). */
+function homeGoalRow({ title, progress, gross, falta }) {
+    const pct = Math.round(progress * 100);
+    const faltaGross = toGross(falta);
+    const faltaText = faltaGross == null ? `faltam ${brl(falta)} líquidos` : `faltam ≈ ${brl(faltaGross)}`;
     return `
     <div class="goal-mini">
-        <div class="goal-mini-head"><span class="goal-mini-name">${esc(goalTitle(r.goal))}</span><span class="goal-mini-pct">${pct}%</span></div>
+        <div class="goal-mini-head"><span class="goal-mini-name">${esc(title)}</span><span class="goal-mini-pct">${pct}%</span></div>
         <div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div>
-        <div class="goal-mini-line"><span><strong>${brl(r.net)}</strong> de ${brl(r.meta)}</span><span>${sub}</span></div>
-        ${goalTodayLine(r)}
+        <div class="goal-mini-line"><span><strong>${brl(gross)}</strong> faturados</span><span>${faltaText}</span></div>
     </div>`;
 }
+
+const goalMini = (r) => homeGoalRow({ title: goalTitle(r.goal), progress: r.progress, gross: r.gross, falta: r.falta });
 
 function renderGoalWidget() {
     const body = $('goal-widget-body');
     if (!body || !state.data) return;
-    const { results, combined } = goalEval();
+    const { results } = goalEval();
     const list = results.filter(isOpenGoal);
 
     if (!list.length) {
@@ -1117,7 +1118,7 @@ function renderGoalWidget() {
         body.innerHTML = `<p class="goal-empty-text">${finished
             ? 'Nenhuma meta em andamento. Crie uma nova e veja quanto precisa fazer por dia.'
             : 'Tem um objetivo? Diga quanto quer fazer de lucro líquido e até quando: calculamos quanto você precisa fazer por dia.'}</p>
-            ${finished ? '<div class="goal-more"><button type="button" class="link-btn" data-goto-goals>Ver metas anteriores</button></div>' : ''}`;
+            ${finished ? '<div class="goal-more"><button type="button" class="link-btn" data-goto-goals>Ver metas</button></div>' : ''}`;
         return;
     }
 
@@ -1125,11 +1126,17 @@ function renderGoalWidget() {
     if (list.length <= MAX_HOME_GOALS) {
         html = list.map(goalMini).join('');
     } else {
-        // muitas metas: card com o total + as que o usuário escolheu mostrar (até 2)
-        const pinned = list.filter(r => r.goal.showOnHome).slice(0, MAX_HOME_GOALS);
-        html = (combined ? combinedCard(combined, list, true) : '') + pinned.map(goalMini).join('');
+        // muitas metas: uma linha com o total + as que o usuário escolheu mostrar (até 2)
+        const meta = list.reduce((a, r) => a + r.meta, 0);
+        const net = list.reduce((a, r) => a + Math.max(0, r.net), 0);
+        html = homeGoalRow({
+            title: `Todas as metas (${list.length})`,
+            progress: meta > 0 ? Math.min(1, net / meta) : 0,
+            gross: list.reduce((a, r) => a + r.gross, 0),
+            falta: list.reduce((a, r) => a + r.falta, 0)
+        }) + list.filter(r => r.goal.showOnHome).slice(0, MAX_HOME_GOALS).map(goalMini).join('');
     }
-    body.innerHTML = html + `<div class="goal-more"><button type="button" class="link-btn" data-goto-goals>${list.length > MAX_HOME_GOALS ? `Ver todas (${list.length})` : 'Ver detalhes'}</button></div>`;
+    body.innerHTML = html + '<div class="goal-more"><button type="button" class="link-btn" data-goto-goals>Ver metas</button></div>';
 }
 
 function renderGoals() {
