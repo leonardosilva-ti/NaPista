@@ -1,5 +1,5 @@
 // Planos e pagamentos (Mercado Pago via API própria em Cloudflare Workers).
-import { getToken, hasValidToken } from './auth.js?v=2.5.0';
+import { getToken, hasValidToken } from './auth.js?v=2.6.0';
 
 // Endereço do Worker publicado (ex.: 'https://napista-api.SEU-USUARIO.workers.dev').
 // Vazio = cobrança desligada: tudo liberado e sem anúncios (útil antes de publicar a API).

@@ -1,6 +1,6 @@
 // Gestão na Pista: telas do controle financeiro (resumo, lançamentos, cartões e contas).
-import * as L from './logic.js?v=2.5.0';
-import * as F from './finance.js?v=2.5.0';
+import * as L from './logic.js?v=2.6.0';
+import * as F from './finance.js?v=2.6.0';
 
 export const GESTAO_SCREENS = ['fin-home-screen', 'fin-entries-screen', 'fin-cards-screen', 'fin-accounts-screen'];
 
@@ -14,6 +14,7 @@ const ICON_PREV = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path
 const ICON_NEXT = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>';
 const ICON_CARD = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg>';
 const ICON_PLUS = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+const ICON_SWAP = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/></svg>';
 const ICON_TRASH = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>';
 
 export function createGestao(ctx) {
@@ -38,6 +39,8 @@ export function createGestao(ctx) {
         editingCard: null,
         cardColor: F.CARD_COLORS[0],
         editingAccount: null,
+        pay: null,            // fatura sendo paga: { cardId, ym, paymentId }
+        editingTransfer: null,
         onboardMode: null,
         onboardSince: 'today'
     };
@@ -96,6 +99,33 @@ export function createGestao(ctx) {
         </button></li>`;
     }
 
+    /** Transferências e pagamentos de fatura: movem dinheiro, não são receita nem despesa. */
+    function moveRow(m) {
+        ui.occMap.set(m.id, m);
+        const future = m.date > todayKey();
+        let title, sub, icon;
+        if (m.kind === 'transfer') {
+            const t = m.transfer;
+            title = esc(m.desc || 'Transferência');
+            sub = `${esc(account(t.fromId)?.name || 'Conta')} → ${esc(account(t.toId)?.name || 'Conta')}`;
+            icon = `<span class="cat-dot move-dot" aria-hidden="true">${ICON_SWAP}</span>`;
+        } else {
+            const [y, mo] = m.payment.ym.split('-').map(Number);
+            title = `Fatura ${esc(m.card.name)}`;
+            sub = `Fatura de ${MONTHS[mo - 1].toLowerCase()}${String(y) !== todayKey().slice(0, 4) ? ' ' + y : ''} · ${esc(account(m.accountId)?.name || 'Conta')}`;
+            icon = `<span class="cc-chip" style="--cc:${esc(m.card.color)}">${ICON_CARD}</span>`;
+        }
+        return `
+        <li><button type="button" class="list-item fin-row${future ? ' is-future' : ''}" data-occ="${esc(m.id)}">
+            ${icon}
+            <span class="item-main">
+                <span class="item-title">${title} ${m.kind === 'payment' ? '<span class="tag">Pagamento</span>' : ''}${future ? ' <span class="tag tag-info">Agendado</span>' : ''}</span>
+                <span class="item-sub">${sub}</span>
+            </span>
+            <span class="item-value move-value">${brl(m.amount)}</span>
+        </button></li>`;
+    }
+
     function monthNav() {
         const cur = F.ymOf(todayKey());
         const sub = ui.month === cur ? 'Este mês' : ui.month < cur ? 'Realizado' : 'Previsão';
@@ -144,11 +174,11 @@ export function createGestao(ctx) {
         } else if (ym < cur) {
             heroLabel = `Saldo no fim de ${ymLabel(ym).toLowerCase()}`;
             heroValue = balEnd;
-            heroSub = 'contas somadas, com as faturas pagas no mês';
+            heroSub = 'contas somadas no fim do mês';
         } else {
             heroLabel = `Saldo previsto em ${shortDate(end)}`;
             heroValue = balEnd;
-            heroSub = 'com os fixos, parcelas e faturas que vão cair';
+            heroSub = 'com os fixos, parcelas e faturas a pagar até lá';
         }
 
         const accounts = fin().accounts.map(a => `
@@ -157,16 +187,27 @@ export function createGestao(ctx) {
                 <span class="item-value ${accMap.get(a.id) < 0 ? 'neg' : ''}">${brl(accMap.get(a.id) || 0)}</span>
             </button></li>`).join('');
 
+        const alerts = [];
         const cards = fin().cards.map(c => {
             const st = F.cardStatus(data(), c, tk, 1);
             const inv = F.cardInvoice(data(), c, st.openYm, tk);
+            st.pending.forEach(pv => alerts.push({ card: c, ...pv }));
+            const late = st.pending.some(pv => pv.status === 'overdue');
             return `
             <li><button type="button" class="list-item" data-goto-card="${esc(c.id)}">
                 <span class="cc-chip" style="--cc:${esc(c.color)}">${ICON_CARD}</span>
-                <span class="item-main"><span class="item-title">${esc(c.name)}</span><span class="item-sub">Fatura de ${ymLabel(st.openYm, true)} · vence ${shortDate(inv.due)}</span></span>
+                <span class="item-main"><span class="item-title">${esc(c.name)}${late ? ' <span class="tag tag-danger">Vencida</span>' : ''}</span><span class="item-sub">Fatura de ${ymLabel(st.openYm, true)} · vence ${shortDate(inv.due)}</span></span>
                 <span class="item-value">${brl(inv.total)}<small>livre ${brl(st.freeForecast)}</small></span>
             </button></li>`;
         }).join('');
+        const alertsHtml = alerts.map(a => `
+            <section class="card fin-alert" data-state="${a.status}">
+                <div>
+                    <strong>Fatura ${esc(a.card.name)} de ${ymLabel(a.ym).toLowerCase()} ${a.status === 'overdue' ? 'vencida' : 'fechada'}</strong>
+                    <span>${a.status === 'overdue' ? `Venceu em ${shortDate(a.due)}` : `Vence em ${shortDate(a.due)}`} · falta pagar ${brl(a.remaining)}</span>
+                </div>
+                <button type="button" class="btn btn-sm ${a.status === 'overdue' ? 'btn-danger' : 'btn-primary'}" data-pay="${esc(a.card.id)}" data-pay-ym="${a.ym}">Pagar</button>
+            </section>`).join('');
 
         const cats = [...sum.byCategory.entries()].sort((a, b) => b[1] - a[1]);
         const max = cats.length ? cats[0][1] : 0;
@@ -184,9 +225,9 @@ export function createGestao(ctx) {
         const next = F.upcoming(data(), tk, 10);
         const nextHtml = next.length
             ? next.map(o => o.invoice
-                ? `<li><button type="button" class="list-item" data-goto-card="${esc(o.card.id)}">
+                ? `<li><button type="button" class="list-item" data-goto-card="${esc(o.card.id)}" data-goto-invoice="${o.ym}">
                         <span class="cc-chip" style="--cc:${esc(o.card.color)}">${ICON_CARD}</span>
-                        <span class="item-main"><span class="item-title">${esc(o.desc)}</span><span class="item-sub">${weekdayDate(o.date)} · débito em ${esc(account(o.card.accountId)?.name || 'conta')}</span></span>
+                        <span class="item-main"><span class="item-title">${esc(o.desc)}</span><span class="item-sub">${weekdayDate(o.date)} · vencimento · ${esc(account(o.card.accountId)?.name || 'conta')}</span></span>
                         <span class="item-value neg">− ${brl(o.amount)}</span>
                     </button></li>`
                 : occRow(o, { showDate: true })).join('')
@@ -200,6 +241,7 @@ export function createGestao(ctx) {
                 <div class="hero-value ${heroValue < 0 ? 'neg' : ''}">${brl(heroValue)}</div>
                 <p class="hero-sub">${heroSub}</p>
             </section>
+            ${ym === cur ? alertsHtml : ''}
             <section class="stat-grid" aria-label="Resumo do mês">
                 <button type="button" class="stat stat-btn" data-goto-filter="income"><span class="stat-label">Receitas</span><span class="stat-value pos">${brl(sum.income)}</span><span class="stat-sub">${integ.mode === 'gross' ? 'apps pelo bruto' : 'apps pelo líquido'}</span></button>
                 <button type="button" class="stat stat-btn" data-goto-filter="expense"><span class="stat-label">Despesas</span><span class="stat-value neg">${brl(sum.expense)}</span><span class="stat-sub">${sum.cardExpense > 0 ? `${brl(sum.cardExpense)} no cartão` : 'contas e cartões'}</span></button>
@@ -207,7 +249,7 @@ export function createGestao(ctx) {
                 <button type="button" class="stat stat-btn" data-goto="fin-cards-screen"><span class="stat-label">Faturas do mês</span><span class="stat-value">${brl(sum.invoiceTotal)}</span><span class="stat-sub">${sum.invoices.length ? plural(sum.invoices.length, 'cartão', 'cartões') : 'nenhuma fatura'}</span></button>
             </section>
             <section class="card">
-                <div class="card-head"><h2 class="card-title">Contas</h2><span class="card-total">${brl(F.totalBalance(data(), accMap))}</span></div>
+                <div class="card-head"><h2 class="card-title">Contas <span class="card-total">${brl(F.totalBalance(data(), accMap))}</span></h2><button type="button" class="btn btn-soft btn-sm btn-icon-text" data-new-transfer>${ICON_SWAP}Transferir</button></div>
                 <ul class="list list-select">${accounts}</ul>
             </section>
             <section class="card">
@@ -232,15 +274,18 @@ export function createGestao(ctx) {
         const expense = all.filter(o => o.type === 'expense').reduce((a, o) => a + o.amount, 0);
         const list = all.filter(o => ui.filter === 'all' ? true
             : ui.filter === 'card' ? !!o.cardId
-            : o.type === ui.filter).reverse();
+            : o.type === ui.filter);
+        if (ui.filter === 'all') list.push(...F.movements(data(), start, end));
+        list.sort((a, b) => b.date.localeCompare(a.date));
 
         const groups = new Map();
         list.forEach(o => { if (!groups.has(o.date)) groups.set(o.date, []); groups.get(o.date).push(o); });
         const tk = todayKey();
         const rows = [...groups.entries()].map(([key, items]) => {
-            const day = items.reduce((a, o) => a + (o.type === 'income' ? o.amount : -o.amount), 0);
+            const day = items.reduce((a, o) => a + (o.kind === 'transfer' || o.kind === 'payment' ? 0 : o.type === 'income' ? o.amount : -o.amount), 0);
             const label = key === tk ? 'Hoje' : key === F.addDaysKey(tk, -1) ? 'Ontem' : key === F.addDaysKey(tk, 1) ? 'Amanhã' : weekdayDate(key);
-            return `<li class="day-head"><span>${label}</span><span class="${day < 0 ? 'neg' : 'pos'}">${day < 0 ? '−' : '+'} ${brl(Math.abs(day))}</span></li>` + items.map(o => occRow(o)).join('');
+            const onlyMoves = items.every(o => o.kind === 'transfer' || o.kind === 'payment');
+            return `<li class="day-head"><span>${label}</span>${onlyMoves ? '' : `<span class="${day < 0 ? 'neg' : 'pos'}">${day < 0 ? '−' : '+'} ${brl(Math.abs(day))}</span>`}</li>` + items.map(o => (o.kind === 'transfer' || o.kind === 'payment' ? moveRow(o) : occRow(o))).join('');
         }).join('');
 
         const filters = [['all', 'Todos'], ['income', 'Receitas'], ['expense', 'Despesas'], ['card', 'Cartão']];
@@ -260,7 +305,8 @@ export function createGestao(ctx) {
     }
 
     // ── Cartões ──
-    const STATUS_LABEL = { open: 'Aberta', closed: 'Fechada', paid: 'Paga' };
+    const STATUS_LABEL = { open: 'Aberta', closed: 'Fechada', overdue: 'Vencida', paid: 'Paga', empty: 'Sem gastos', settled: 'Anterior ao cadastro' };
+    const STATUS_BADGE = { paid: 'badge-brand', closed: 'badge-warn', overdue: 'badge-danger' };
 
     function renderCards() {
         const cards = fin().cards;
@@ -279,7 +325,7 @@ export function createGestao(ctx) {
         const c = cardOf(ui.cardId);
         const tk = todayKey();
         const st = F.cardStatus(data(), c, tk, 6);
-        if (!ui.invoiceYm) ui.invoiceYm = st.closedUnpaid && st.closedUnpaid.total > 0 ? st.firstUnpaid : st.openYm;
+        if (!ui.invoiceYm) ui.invoiceYm = st.pending.length ? st.pending[0].ym : st.openYm;
         const inv = F.cardInvoice(data(), c, ui.invoiceYm, tk);
 
         const pct = (v) => (st.limit > 0 ? Math.max(0, Math.min(100, v / st.limit * 100)) : 0);
@@ -293,8 +339,23 @@ export function createGestao(ctx) {
             </div>` : '';
 
         const statusText = inv.status === 'open' ? `Fecha ${shortDate(inv.closing)} · vence ${shortDate(inv.due)}`
-            : inv.status === 'closed' ? `Fechada · vence ${shortDate(inv.due)}`
-            : `Paga em ${shortDate(inv.due)} pela ${esc(account(c.accountId)?.name || 'conta')}`;
+            : inv.status === 'overdue' ? `Venceu em ${shortDate(inv.due)}`
+            : inv.status === 'settled' ? `Venceu em ${shortDate(inv.due)}, antes do cadastro`
+            : `Fechou ${shortDate(inv.closing)} · vence ${shortDate(inv.due)}`;
+        const payments = inv.payments.map(pm => {
+            const m = { id: `pay:${pm.id}`, kind: 'payment', payment: pm, card: c, date: pm.date, amount: pm.amount, accountId: pm.accountId };
+            return moveRow(m);
+        }).join('');
+        const canPay = inv.remaining > 0.005 && inv.status !== 'settled';
+        const payBlock = `
+            ${inv.paid > 0.005 ? `<div class="invoice-paid"><span>Pago ${brl(inv.paid)}</span>${canPay ? `<span>Falta <strong>${brl(inv.remaining)}</strong></span>` : ''}</div>` : ''}
+            ${canPay ? `<button type="button" class="btn ${inv.status === 'overdue' ? 'btn-danger' : inv.status === 'closed' ? 'btn-primary' : 'btn-soft'}" data-pay="${esc(c.id)}" data-pay-ym="${inv.ym}" style="margin:12px 0 4px">${inv.status === 'open' ? 'Adiantar pagamento' : 'Pagar fatura'} · ${brl(inv.remaining)}</button>` : ''}
+            ${payments ? `<ul class="list list-select fin-list invoice-payments">${payments}</ul>` : ''}`;
+        const pendingHtml = st.pending.map(pv => `
+            <div class="fin-alert inline" data-state="${pv.status}">
+                <div><strong>Fatura de ${ymLabel(pv.ym).toLowerCase()} ${pv.status === 'overdue' ? 'vencida' : 'fechada'}</strong><span>falta pagar ${brl(pv.remaining)} · vence ${shortDate(pv.due)}</span></div>
+                <button type="button" class="btn btn-sm ${pv.status === 'overdue' ? 'btn-danger' : 'btn-primary'}" data-pay="${esc(c.id)}" data-pay-ym="${pv.ym}">Pagar</button>
+            </div>`).join('');
         const invItems = inv.items.length
             ? inv.items.map(o => occRow(o, { showDate: true })).join('')
             : '<li class="empty">Nenhuma compra nesta fatura.</li>';
@@ -303,7 +364,7 @@ export function createGestao(ctx) {
         const rows = st.upcoming.map(u => `
             <li class="proj-row${u.ym === ui.invoiceYm ? ' selected' : ''}">
                 <button type="button" class="list-item" data-invoice="${u.ym}">
-                    <span class="item-main"><span class="item-title">${ymLabel(u.ym)}</span><span class="item-sub">vence ${shortDate(u.due)}${u.fixed > 0 ? ` · ${brl(u.fixed)} de fixos` : ''}</span></span>
+                    <span class="item-main"><span class="item-title">${ymLabel(u.ym)}</span><span class="item-sub">vence ${shortDate(u.due)}${u.fixed > 0 ? ` · ${brl(u.fixed)} de fixos` : ''}${u.paid > 0.005 ? ` · pago ${brl(u.paid)}` : ''}</span></span>
                     <span class="item-value">${brl(u.total)}<small class="${u.free < 0 ? 'neg' : ''}">livre ≈ ${brl(u.free)}</small></span>
                 </button>
             </li>`).join('');
@@ -312,7 +373,7 @@ export function createGestao(ctx) {
             ${selector}
             <section class="card cc-card" style="--cc:${esc(c.color)}">
                 <div class="card-head">
-                    <div class="cc-title"><span class="cc-chip">${ICON_CARD}</span><div><h2 class="card-title">${esc(c.name)}</h2><p class="item-sub">Fecha dia ${c.closingDay} · vence dia ${c.dueDay} · paga pela ${esc(account(c.accountId)?.name || 'conta')}</p></div></div>
+                    <div class="cc-title"><span class="cc-chip">${ICON_CARD}</span><div><h2 class="card-title">${esc(c.name)}</h2><p class="item-sub">Fecha dia ${c.closingDay} · vence dia ${c.dueDay}</p></div></div>
                     <button type="button" class="btn btn-ghost btn-sm" data-edit-card="${esc(c.id)}">Editar</button>
                 </div>
                 <div class="cc-limit">
@@ -325,11 +386,12 @@ export function createGestao(ctx) {
                     <span class="limit-fixed" style="width:${fixedPct.toFixed(1)}%"></span>
                 </div>
                 <div class="legend">
-                    <div class="legend-row"><span><i class="legend-dot limit-used"></i>Usado</span><strong>${brl(st.used)}</strong></div>
+                    <div class="legend-row"><span><i class="legend-dot limit-used"></i>Usado (falta pagar)</span><strong>${brl(st.used)}</strong></div>
                     ${st.futureInstallments > 0 ? `<div class="legend-row legend-sub"><span>inclui parcelas das próximas faturas</span><span>${brl(st.futureInstallments)}</span></div>` : ''}
                     <div class="legend-row"><span><i class="legend-dot limit-fixed"></i>Fixos que ainda vão cair</span><strong>${brl(st.fixedPending)}</strong></div>
                     <div class="legend-row"><span><i class="legend-dot legend-free"></i>Livre previsto</span><strong class="${over ? 'neg' : ''}">${brl(st.freeForecast)}</strong></div>
                 </div>
+                ${pendingHtml}
                 <button type="button" class="btn btn-soft" data-new-card-entry="${esc(c.id)}" style="margin-top:14px">${ICON_PLUS}Nova compra no cartão</button>
             </section>
 
@@ -340,9 +402,10 @@ export function createGestao(ctx) {
                     <button type="button" class="icon-btn" data-invoice-step="1" aria-label="Próxima fatura">${ICON_NEXT}</button>
                 </div>
                 <div class="invoice-total">
-                    <span class="badge ${inv.status === 'paid' ? 'badge-brand' : inv.status === 'closed' ? 'badge-warn' : ''}">${STATUS_LABEL[inv.status]}</span>
+                    <span class="badge ${STATUS_BADGE[inv.status] || ''}">${STATUS_LABEL[inv.status]}</span>
                     <strong>${brl(inv.total)}</strong>
                 </div>
+                ${payBlock}
                 ${invFixed > 0 ? `<p class="hint">Inclui ${brl(invFixed)} de gastos fixos previstos que ainda não caíram.</p>` : ''}
                 <ul class="list list-select fin-list">${invItems}</ul>
             </section>
@@ -367,7 +430,10 @@ export function createGestao(ctx) {
             <section class="card">
                 <div class="card-head">
                     <h2 class="card-title">Contas</h2>
-                    <button type="button" class="btn btn-soft btn-sm btn-icon-text" data-new-account>${ICON_PLUS}Nova conta</button>
+                    <div class="head-actions">
+                        <button type="button" class="btn btn-ghost btn-sm btn-icon-text" data-new-transfer>${ICON_SWAP}Transferir</button>
+                        <button type="button" class="btn btn-soft btn-sm btn-icon-text" data-new-account>${ICON_PLUS}Nova conta</button>
+                    </div>
                 </div>
                 <ul class="list list-select">
                     ${fin().accounts.map(a => `
@@ -472,6 +538,7 @@ export function createGestao(ctx) {
 
     function renderEntryType() {
         const t = ui.entryType;
+        $('fin-entry-type').querySelector('[data-entry-type="transfer"]').hidden = !!ui.entry;
         document.querySelectorAll('#fin-entry-type .seg-btn').forEach(b => {
             const on = b.dataset.entryType === t;
             b.classList.toggle('active', on);
@@ -759,21 +826,145 @@ export function createGestao(ctx) {
         const count = fin().entries.filter(e => e.cardId === c.id).length;
         const ok = await confirmDialog({
             title: 'Excluir cartão?',
-            message: count ? `"${c.name}" e ${plural(count, 'compra lançada', 'compras lançadas')} nele serão excluídos. As faturas já pagas deixam de aparecer no saldo das contas.` : `"${c.name}" será excluído.`,
+            message: count ? `"${c.name}", ${plural(count, 'a compra lançada', 'as compras lançadas')} nele e os pagamentos de fatura serão excluídos. Os pagamentos deixam de aparecer no saldo das contas.` : `"${c.name}" será excluído.`,
             confirmLabel: 'Excluir',
             danger: true
         });
         if (!ok) return;
-        const snapshot = JSON.stringify({ cards: fin().cards, entries: fin().entries });
+        const snapshot = JSON.stringify({ cards: fin().cards, entries: fin().entries, payments: fin().payments });
         fin().cards = fin().cards.filter(x => x !== c);
         fin().entries = fin().entries.filter(e => e.cardId !== c.id);
+        fin().payments = fin().payments.filter(p => p.cardId !== c.id);
         $('fin-card-dialog').close();
         markChanged();
         rerender();
         toast('Cartão excluído.', {
             action: 'Desfazer',
-            onAction: () => { const s = JSON.parse(snapshot); fin().cards = s.cards; fin().entries = s.entries; markChanged(); rerender(); }
+            onAction: () => { const s = JSON.parse(snapshot); fin().cards = s.cards; fin().entries = s.entries; fin().payments = s.payments; markChanged(); rerender(); }
         });
+    }
+
+    // ═══════════════════════ Pagar fatura (diálogo) ═══════════════════════
+    function openPay(cardId, ym, paymentId = null) {
+        const c = cardOf(cardId);
+        if (!c) return;
+        const pm = paymentId ? fin().payments.find(p => p.id === paymentId) : null;
+        const inv = F.cardInvoice(data(), c, pm ? pm.ym : ym, todayKey());
+        ui.pay = { cardId, ym: inv.ym, paymentId: pm?.id || null };
+        $('fin-pay-title').textContent = pm ? 'Pagamento de fatura' : 'Pagar fatura';
+        $('fin-pay-info').innerHTML = `<strong>${esc(c.name)}</strong> · fatura de ${ymLabel(inv.ym).toLowerCase()} · vence ${fullDate(inv.due)}<br>Total ${brl(inv.total)}${inv.paid > 0.005 ? ` · já pago ${brl(inv.paid)}` : ''}`;
+        $('fin-pay-amount').value = moneyInput(pm ? pm.amount : inv.remaining);
+        $('fin-pay-date').value = pm ? pm.date : todayKey();
+        fillSelect('fin-pay-account', fin().accounts, pm ? pm.accountId : c.accountId);
+        $('fin-pay-delete').hidden = !pm;
+        $('fin-pay-submit').textContent = pm ? 'Salvar' : 'Confirmar pagamento';
+        $('fin-pay-dialog').showModal();
+    }
+
+    function savePay(ev) {
+        ev.preventDefault();
+        const amount = parseDecimal($('fin-pay-amount').value);
+        const date = $('fin-pay-date').value;
+        if (!(amount > 0)) { toast('Informe o valor pago.', { type: 'error' }); $('fin-pay-amount').focus(); return; }
+        if (!date) { toast('Informe a data do pagamento.', { type: 'error' }); return; }
+        const values = { amount, date, accountId: $('fin-pay-account').value };
+        const existing = ui.pay.paymentId && fin().payments.find(p => p.id === ui.pay.paymentId);
+        if (existing) Object.assign(existing, values);
+        else fin().payments.push({ id: uid(), cardId: ui.pay.cardId, ym: ui.pay.ym, ...values });
+        $('fin-pay-dialog').close();
+        markChanged(0);
+        const c = cardOf(ui.pay.cardId);
+        const inv = F.cardInvoice(data(), c, ui.pay.ym, todayKey());
+        rerender();
+        toast(existing ? 'Pagamento atualizado.'
+            : inv.remaining > 0.005 ? `Pagamento registrado. Ainda faltam ${brl(inv.remaining)} desta fatura.`
+            : 'Fatura paga! O limite foi liberado.');
+    }
+
+    function deletePay() {
+        const pm = ui.pay?.paymentId && fin().payments.find(p => p.id === ui.pay.paymentId);
+        if (!pm) return;
+        const i = fin().payments.indexOf(pm);
+        fin().payments.splice(i, 1);
+        $('fin-pay-dialog').close();
+        markChanged();
+        rerender();
+        toast('Pagamento desfeito.', { action: 'Desfazer', onAction: () => { fin().payments.splice(i, 0, pm); markChanged(); rerender(); } });
+    }
+
+    // ═══════════════════════ Transferência (diálogo) ═══════════════════════
+    function openTransfer(id = null, amount = '') {
+        if (!id && fin().accounts.length < 2) {
+            toast('Crie outra conta para transferir entre elas.', { action: 'Nova conta', onAction: () => openAccount() });
+            return;
+        }
+        const t = id ? fin().transfers.find(x => x.id === id) : null;
+        ui.editingTransfer = t ? t.id : null;
+        const accs = fin().accounts;
+        $('fin-transfer-title').textContent = t ? 'Editar transferência' : 'Transferência entre contas';
+        $('fin-transfer-amount').value = t ? moneyInput(t.amount) : amount;
+        fillSelect('fin-transfer-from', accs, t ? t.fromId : F.WALLET_ID);
+        fillSelect('fin-transfer-to', accs, t ? t.toId : (accs.find(a => a.id !== F.WALLET_ID)?.id));
+        $('fin-transfer-date').value = t ? t.date : todayKey();
+        $('fin-transfer-desc').value = t?.desc || '';
+        $('fin-transfer-delete').hidden = !t;
+        updateTransferPreview();
+        $('fin-transfer-dialog').showModal();
+        if (!t && !amount) setTimeout(() => $('fin-transfer-amount').focus(), 50);
+    }
+
+    function updateTransferPreview() {
+        const el = $('fin-transfer-preview');
+        const amount = parseDecimal($('fin-transfer-amount').value);
+        const from = $('fin-transfer-from').value, to = $('fin-transfer-to').value;
+        if (from && from === to) {
+            el.hidden = false; el.classList.add('warn');
+            el.innerHTML = '<div>Escolha contas diferentes.</div>';
+            return;
+        }
+        el.classList.remove('warn');
+        if (!(amount > 0)) { el.hidden = true; return; }
+        // saldo hoje sem esta transferência (ao editar, desconta ela)
+        const map = F.balances(data(), todayKey());
+        const t = ui.editingTransfer && fin().transfers.find(x => x.id === ui.editingTransfer);
+        if (t && t.date <= todayKey()) { map.set(t.fromId, map.get(t.fromId) + t.amount); map.set(t.toId, map.get(t.toId) - t.amount); }
+        const rows = [
+            [`${esc(account(from)?.name)} fica com`, brl((map.get(from) || 0) - amount)],
+            [`${esc(account(to)?.name)} fica com`, brl((map.get(to) || 0) + amount)]
+        ];
+        el.hidden = false;
+        el.innerHTML = rows.map(([k, v]) => `<div class="preview-row"><span>${k}</span><strong>${v}</strong></div>`).join('');
+    }
+
+    function saveTransfer(ev) {
+        ev.preventDefault();
+        const amount = parseDecimal($('fin-transfer-amount').value);
+        const fromId = $('fin-transfer-from').value;
+        const toId = $('fin-transfer-to').value;
+        const date = $('fin-transfer-date').value;
+        const fail = (msg, id) => { toast(msg, { type: 'error' }); if (id) $(id).focus(); };
+        if (!(amount > 0)) return fail('Informe o valor.', 'fin-transfer-amount');
+        if (fromId === toId) return fail('Escolha contas diferentes.', 'fin-transfer-to');
+        if (!date) return fail('Informe a data.', 'fin-transfer-date');
+        const values = { fromId, toId, amount, date, desc: $('fin-transfer-desc').value.trim() };
+        const existing = ui.editingTransfer && fin().transfers.find(x => x.id === ui.editingTransfer);
+        if (existing) Object.assign(existing, values);
+        else fin().transfers.push({ id: uid(), ...values });
+        $('fin-transfer-dialog').close();
+        markChanged(0);
+        rerender();
+        toast(existing ? 'Transferência atualizada.' : `${brl(amount)} transferidos para ${account(toId)?.name}.`);
+    }
+
+    function deleteTransfer() {
+        const t = ui.editingTransfer && fin().transfers.find(x => x.id === ui.editingTransfer);
+        if (!t) return;
+        const i = fin().transfers.indexOf(t);
+        fin().transfers.splice(i, 1);
+        $('fin-transfer-dialog').close();
+        markChanged();
+        rerender();
+        toast('Transferência excluída.', { action: 'Desfazer', onAction: () => { fin().transfers.splice(i, 0, t); markChanged(); rerender(); } });
     }
 
     // ═══════════════════════ Conta (diálogo) ═══════════════════════
@@ -809,7 +1000,7 @@ export function createGestao(ctx) {
         const a = ui.editingAccount && account(ui.editingAccount);
         if (!a || a.id === F.WALLET_ID) return;
         if (F.usage(data(), { accountId: a.id })) {
-            toast('Essa conta tem lançamentos, cartões ou recebe os ganhos dos apps. Mude ou exclua esses itens antes.', { type: 'error', duration: 6000 });
+            toast('Essa conta tem lançamentos, transferências, pagamentos de fatura, cartões ou recebe os ganhos dos apps. Mude ou exclua esses itens antes.', { type: 'error', duration: 6000 });
             return;
         }
         const ok = await confirmDialog({ title: 'Excluir conta?', message: `"${a.name}" será excluída.`, confirmLabel: 'Excluir', danger: true });
@@ -936,6 +1127,8 @@ export function createGestao(ctx) {
             });
             return;
         }
+        if (o.kind === 'transfer') return openTransfer(o.transfer.id);
+        if (o.kind === 'payment') return openPay(o.card.id, o.payment.ym, o.payment.id);
         openEntry({ occ: o });
     }
 
@@ -958,8 +1151,11 @@ export function createGestao(ctx) {
             if (go) return ctx.showScreen(go.dataset.goto);
             const goFilter = t.closest('[data-goto-filter]');
             if (goFilter) { ui.filter = goFilter.dataset.gotoFilter; return ctx.showScreen('fin-entries-screen'); }
+            const pay = t.closest('[data-pay]');
+            if (pay) return openPay(pay.dataset.pay, pay.dataset.payYm);
+            if (t.closest('[data-new-transfer]')) return openTransfer();
             const goCard = t.closest('[data-goto-card]');
-            if (goCard) { ui.cardId = goCard.dataset.gotoCard; ui.invoiceYm = null; return ctx.showScreen('fin-cards-screen'); }
+            if (goCard) { ui.cardId = goCard.dataset.gotoCard; ui.invoiceYm = goCard.dataset.gotoInvoice || null; return ctx.showScreen('fin-cards-screen'); }
             const sel = t.closest('[data-card-select]');
             if (sel) { ui.cardId = sel.dataset.cardSelect; ui.invoiceYm = null; return rerender(); }
             const inv = t.closest('[data-invoice]');
@@ -1004,6 +1200,13 @@ export function createGestao(ctx) {
 
         // Diálogo de lançamento
         document.querySelectorAll('#fin-entry-type .seg-btn').forEach(b => b.addEventListener('click', () => {
+            if (b.dataset.entryType === 'transfer') {
+                if (ui.entry) return; // um lançamento existente não vira transferência
+                const amount = $('fin-entry-amount').value;
+                $('fin-entry-dialog').close();
+                openTransfer(null, amount);
+                return;
+            }
             if (b.dataset.entryType === 'card' && !fin().cards.length) {
                 toast('Cadastre um cartão de crédito primeiro.', { action: 'Cadastrar', onAction: () => { $('fin-entry-dialog').close(); openCard(); } });
                 return;
@@ -1042,6 +1245,22 @@ export function createGestao(ctx) {
             const v = parseInt(e.target.value, 10);
             if (v > 31) e.target.value = '31';
         }));
+
+        // Pagar fatura
+        $('fin-pay-form').addEventListener('submit', savePay);
+        $('fin-pay-delete').addEventListener('click', deletePay);
+
+        // Transferência
+        $('fin-transfer-form').addEventListener('submit', saveTransfer);
+        $('fin-transfer-delete').addEventListener('click', deleteTransfer);
+        $('fin-transfer-form').addEventListener('input', updateTransferPreview);
+        $('fin-transfer-form').addEventListener('change', updateTransferPreview);
+        $('fin-transfer-swap').addEventListener('click', () => {
+            const a = $('fin-transfer-from').value;
+            $('fin-transfer-from').value = $('fin-transfer-to').value;
+            $('fin-transfer-to').value = a;
+            updateTransferPreview();
+        });
 
         // Conta
         $('fin-account-form').addEventListener('submit', saveAccount);

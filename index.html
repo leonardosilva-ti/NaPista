@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=2.5.0">
+    <link rel="stylesheet" href="style.css?v=2.6.0">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -333,7 +333,7 @@
                 </div>
             </section>
             <p class="made-by"><span class="covem-mark" aria-hidden="true"></span>Um app Covem.</p>
-            <p class="version">Na Pista · v2.5.0</p>
+            <p class="version">Na Pista · v2.6.0</p>
         </section>
         <!-- ═════════ GESTÃO NA PISTA ═════════ -->
         <section id="fin-home-screen" class="screen">
@@ -551,6 +551,7 @@
                 <button type="button" role="tab" class="seg-btn" data-entry-type="expense">Despesa</button>
                 <button type="button" role="tab" class="seg-btn" data-entry-type="income">Receita</button>
                 <button type="button" role="tab" class="seg-btn" data-entry-type="card">Cartão</button>
+                <button type="button" role="tab" class="seg-btn" data-entry-type="transfer">Transferir</button>
             </div>
             <label class="field">
                 <span class="field-label" id="fin-entry-amount-label">Valor</span>
@@ -677,12 +678,61 @@
         </form>
     </dialog>
 
+    <!-- Gestão: pagar fatura -->
+    <dialog id="fin-pay-dialog" class="sheet" aria-labelledby="fin-pay-title">
+        <form id="fin-pay-form" class="dialog-body" novalidate>
+            <h2 id="fin-pay-title">Pagar fatura</h2>
+            <p class="preview fin-pay-info" id="fin-pay-info"></p>
+            <label class="field" style="margin-top:12px">
+                <span class="field-label">Valor pago</span>
+                <span class="input-wrap input-big"><span class="prefix">R$</span><input type="text" inputmode="numeric" id="fin-pay-amount" class="money" placeholder="0,00" autocomplete="off"></span>
+            </label>
+            <div class="grid-2">
+                <label class="field"><span class="field-label">Data do pagamento</span><input type="date" id="fin-pay-date"></label>
+                <label class="field"><span class="field-label">Pago pela conta</span><select id="fin-pay-account"></select></label>
+            </div>
+            <p class="hint" style="margin-top:0">Pode pagar um valor menor: o que faltar continua em aberto nesta fatura. O limite volta conforme você paga.</p>
+            <div class="dialog-actions">
+                <button type="button" class="btn btn-danger-ghost btn-fit" id="fin-pay-delete" hidden aria-label="Desfazer pagamento"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg></button>
+                <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+                <button type="submit" class="btn btn-primary" id="fin-pay-submit">Confirmar pagamento</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Gestão: transferência entre contas -->
+    <dialog id="fin-transfer-dialog" class="sheet" aria-labelledby="fin-transfer-title">
+        <form id="fin-transfer-form" class="dialog-body" novalidate>
+            <h2 id="fin-transfer-title">Transferência entre contas</h2>
+            <label class="field">
+                <span class="field-label">Valor</span>
+                <span class="input-wrap input-big"><span class="prefix">R$</span><input type="text" inputmode="numeric" id="fin-transfer-amount" class="money" placeholder="0,00" autocomplete="off"></span>
+            </label>
+            <div class="transfer-accounts">
+                <label class="field"><span class="field-label">De</span><select id="fin-transfer-from"></select></label>
+                <button type="button" class="icon-btn" id="fin-transfer-swap" aria-label="Inverter contas"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/></svg></button>
+                <label class="field"><span class="field-label">Para</span><select id="fin-transfer-to"></select></label>
+            </div>
+            <div class="grid-2">
+                <label class="field"><span class="field-label">Data</span><input type="date" id="fin-transfer-date"></label>
+                <label class="field"><span class="field-label">Descrição (opcional)</span><input type="text" id="fin-transfer-desc" maxlength="40" placeholder="Ex: Depósito" autocomplete="off"></label>
+            </div>
+            <div class="preview" id="fin-transfer-preview" hidden></div>
+            <p class="hint">Transferência não conta como receita nem despesa: só move o dinheiro de uma conta para outra.</p>
+            <div class="dialog-actions">
+                <button type="button" class="btn btn-danger-ghost btn-fit" id="fin-transfer-delete" hidden aria-label="Excluir transferência"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg></button>
+                <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+                <button type="submit" class="btn btn-primary">Transferir</button>
+            </div>
+        </form>
+    </dialog>
+
     <div class="toast" id="toast" role="status" aria-live="polite">
         <span id="toast-msg"></span>
         <button type="button" class="toast-action" id="toast-action" hidden></button>
     </div>
 
-    <script src="app.js?v=2.5.0" type="module"></script>
+    <script src="app.js?v=2.6.0" type="module"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {

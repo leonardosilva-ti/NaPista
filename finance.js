@@ -1,6 +1,6 @@
 // Gestão na Pista: regras de finanças pessoais (contas, lançamentos e cartões).
 // Sem dependência de DOM. Datas sempre como "AAAA-MM-DD" no fuso do aparelho.
-import { num, toDateKey, parseDateKey, dayNet, dayGross } from './logic.js?v=2.5.0';
+import { num, toDateKey, parseDateKey, dayNet, dayGross } from './logic.js?v=2.6.0';
 
 export const WALLET_ID = 'carteira';
 export const APPS_CATEGORY_ID = 'r_apps';
@@ -61,7 +61,9 @@ export const defaultFinance = () => ({
     accounts: [{ id: WALLET_ID, name: 'Carteira', kind: 'dinheiro', initial: 0 }],
     categories: defaultCategories(),
     cards: [],
-    entries: []
+    entries: [],
+    payments: [],   // pagamentos de fatura: { id, cardId, ym, amount, date, accountId }
+    transfers: []   // transferências entre contas: { id, fromId, toId, amount, date, desc }
 });
 
 // ── Datas ─────────────────────────────────────────────────────────────
@@ -134,7 +136,9 @@ export function normalizeFinance(raw) {
             closingDay: clampDay(c.closingDay, 1),
             dueDay: clampDay(c.dueDay, 10),
             accountId: accIds.has(c.accountId) ? c.accountId : WALLET_ID,
-            color: typeof c.color === 'string' ? c.color : CARD_COLORS[0]
+            color: typeof c.color === 'string' ? c.color : CARD_COLORS[0],
+            // faturas que venceram antes do cadastro contam como já pagas
+            since: DATE_RE.test(c.since || '') ? c.since : toDateKey(new Date())
         }));
     const cardIds = new Set(cards.map(c => c.id));
 
@@ -159,6 +163,16 @@ export function normalizeFinance(raw) {
             return out;
         });
 
+    const payments = (Array.isArray(f.payments) ? f.payments : [])
+        .filter(p => p && typeof p.id === 'string' && cardIds.has(p.cardId) && /^\d{4}-\d{2}$/.test(p.ym || '')
+            && num(p.amount) > 0 && DATE_RE.test(p.date))
+        .map(p => ({ id: p.id, cardId: p.cardId, ym: p.ym, amount: num(p.amount), date: p.date, accountId: accIds.has(p.accountId) ? p.accountId : WALLET_ID }));
+
+    const transfers = (Array.isArray(f.transfers) ? f.transfers : [])
+        .filter(t => t && typeof t.id === 'string' && accIds.has(t.fromId) && accIds.has(t.toId) && t.fromId !== t.toId
+            && num(t.amount) > 0 && DATE_RE.test(t.date))
+        .map(t => ({ id: t.id, fromId: t.fromId, toId: t.toId, amount: num(t.amount), date: t.date, desc: String(t.desc || '') }));
+
     const integ = f.integration || {};
     const mode = integ.mode === 'net' || integ.mode === 'gross' ? integ.mode : null;
     return {
@@ -168,7 +182,7 @@ export function normalizeFinance(raw) {
             accountId: accIds.has(integ.accountId) ? integ.accountId : WALLET_ID,
             since: DATE_RE.test(integ.since || '') ? integ.since : null
         },
-        accounts, categories, cards, entries
+        accounts, categories, cards, entries, payments, transfers
     };
 }
 
@@ -290,17 +304,36 @@ export function invoiceFor(card, dateKey) {
     return ymShift(ym0, 3);
 }
 
-/** Situação da fatura: aberta (recebendo compras), fechada (aguardando vencimento) ou paga. */
-export function invoiceStatus(card, ym, todayKey) {
-    const { closing, due } = invoiceDates(card, ym);
-    if (todayKey >= due) return 'paid';
-    if (todayKey >= closing) return 'closed';
-    return 'open';
-}
-
 const cardEntries = (data, cardId) => data.finance.entries.filter(e => e.cardId === cardId);
 
-/** Compras de uma fatura. */
+/** Quanto já foi pago de uma fatura. */
+export const paidAmount = (data, cardId, ym) => data.finance.payments
+    .filter(p => p.cardId === cardId && p.ym === ym).reduce((a, p) => a + p.amount, 0);
+
+/** Fatura que venceu antes de o cartão ser cadastrado no app: considerada paga. */
+export const isSettled = (card, ym) => invoiceDates(card, ym).due < card.since;
+
+/**
+ * Situação da fatura:
+ * open (recebendo compras), closed (fechada, aguardando pagamento),
+ * overdue (vencida sem pagamento completo), paid (paga), empty (sem gastos),
+ * settled (anterior ao cadastro do cartão).
+ */
+export function invoiceState(data, card, ym, todayKey, total) {
+    const { closing, due } = invoiceDates(card, ym);
+    const paid = paidAmount(data, card.id, ym);
+    const remaining = Math.max(0, Math.round((total - paid) * 100) / 100);
+    let status;
+    if (isSettled(card, ym)) status = 'settled';
+    else if (total <= 0.005 && paid <= 0.005) status = todayKey >= closing ? 'empty' : 'open';
+    else if (remaining <= 0.005) status = 'paid';
+    else if (todayKey >= due) status = 'overdue';
+    else if (todayKey >= closing) status = 'closed';
+    else status = 'open';
+    return { status, paid, remaining: status === 'settled' ? 0 : remaining };
+}
+
+/** Compras de uma fatura, com o que já foi pago. */
 export function cardInvoice(data, card, ym, todayKey) {
     const { closing, due } = invoiceDates(card, ym);
     const from = invoiceDates(card, ymShift(ym, -1)).closing;
@@ -309,42 +342,58 @@ export function cardInvoice(data, card, ym, todayKey) {
     cardEntries(data, card.id).forEach(e => items.push(...expandEntry(e, from, to)));
     items.sort((a, b) => a.date.localeCompare(b.date));
     const total = items.reduce((a, o) => a + o.amount, 0);
-    return { ym, closing, due, items, total, status: invoiceStatus(card, ym, todayKey) };
+    const payments = data.finance.payments.filter(p => p.cardId === card.id && p.ym === ym).sort((a, b) => a.date.localeCompare(b.date));
+    return { ym, closing, due, items, total, payments, ...invoiceState(data, card, ym, todayKey, total) };
+}
+
+/** Ocorrências do cartão agrupadas por fatura (fixos até `fixedUntil`). */
+function cardInvoices(data, card, fixedUntil, finiteUntil = '9999-12-31') {
+    const map = new Map();
+    cardEntries(data, card.id).forEach(e => {
+        expandEntry(e, '0000-01-01', e.rec?.kind === 'fixed' ? fixedUntil : finiteUntil).forEach(o => {
+            o.invoice = invoiceFor(card, o.date);
+            if (!map.has(o.invoice)) map.set(o.invoice, []);
+            map.get(o.invoice).push(o);
+        });
+    });
+    return map;
 }
 
 /**
  * Limite e previsão do cartão.
- * - Usado: compras das faturas ainda não pagas, incluindo as parcelas futuras
- *   (os bancos bloqueiam o valor total da compra parcelada) e os fixos já lançados.
+ * - Usado: o que falta pagar das faturas (inclusive fechadas ou vencidas), as
+ *   parcelas futuras (os bancos bloqueiam o valor total da compra parcelada)
+ *   e os fixos já lançados. O limite só volta quando a fatura é paga.
  * - Fixos previstos: despesas fixas (streamings, academia…) que ainda vão cair
- *   antes da fatura aberta fechar. Elas não estão no banco ainda, mas já contam
- *   no "livre previsto".
+ *   antes da fatura aberta fechar. Já contam no "livre previsto".
  * - Próximas faturas: total previsto de cada mês com parcelas e fixos, e o
  *   limite livre previsto quando aquela fatura estiver aberta.
  */
 export function cardStatus(data, card, todayKey, months = 6) {
     const openYm = invoiceFor(card, todayKey);
-    const prevYm = ymShift(openYm, -1);
-    const firstUnpaid = invoiceDates(card, prevYm).due > todayKey ? prevYm : openYm;
-    const from = invoiceDates(card, ymShift(firstUnpaid, -1)).closing;
     const lastYm = ymShift(openYm, months - 1);
     const horizonEnd = addDaysKey(invoiceDates(card, lastYm).closing, -1);
-
-    const occs = [];
-    cardEntries(data, card.id).forEach(e => {
-        occs.push(...expandEntry(e, from, e.rec?.kind === 'fixed' ? horizonEnd : '9999-12-31'));
-    });
-    occs.forEach(o => { o.invoice = invoiceFor(card, o.date); });
+    const groups = cardInvoices(data, card, horizonEnd);
+    const sum = (list) => list.reduce((a, o) => a + o.amount, 0);
 
     let used = 0, fixedPending = 0, futureInstallments = 0;
-    for (const o of occs) {
-        if (o.invoice < firstUnpaid) continue;
-        if (o.kind === 'fixed') {
-            if (o.invoice > openYm) continue;
-            if (o.date <= todayKey) used += o.amount; else fixedPending += o.amount;
-        } else {
-            used += o.amount;
-            if (o.invoice > openYm) futureInstallments += o.amount;
+    const pending = []; // faturas anteriores à aberta ainda não pagas
+    for (const [ym, list] of groups) {
+        if (isSettled(card, ym)) continue;
+        const paid = paidAmount(data, card.id, ym);
+        if (ym > openYm) {
+            const finite = sum(list.filter(o => o.kind !== 'fixed'));
+            used += Math.max(0, finite - paid);
+            futureInstallments += Math.max(0, finite - paid);
+            continue;
+        }
+        const committed = sum(list.filter(o => o.kind !== 'fixed' || o.date <= todayKey));
+        const toCome = sum(list.filter(o => o.kind === 'fixed' && o.date > todayKey));
+        used += Math.max(0, committed - paid);
+        fixedPending += Math.max(0, toCome - Math.max(0, paid - committed));
+        if (ym < openYm) {
+            const st = invoiceState(data, card, ym, todayKey, sum(list));
+            if (st.remaining > 0.005) pending.push({ ym, ...invoiceDates(card, ym), ...st });
         }
     }
     const limit = num(card.limit);
@@ -354,27 +403,32 @@ export function cardStatus(data, card, todayKey, months = 6) {
     const upcoming = [];
     for (let i = 0; i < months; i++) {
         const ym = ymShift(openYm, i);
-        const items = occs.filter(o => o.invoice === ym);
-        const total = items.reduce((a, o) => a + o.amount, 0);
-        const fixed = items.filter(o => o.kind === 'fixed').reduce((a, o) => a + o.amount, 0);
-        const finiteAhead = occs.filter(o => o.kind !== 'fixed' && o.invoice >= ym).reduce((a, o) => a + o.amount, 0);
+        const list = groups.get(ym) || [];
+        const total = sum(list);
+        const fixed = sum(list.filter(o => o.kind === 'fixed'));
+        let finiteAhead = 0;
+        for (const [y, l] of groups) {
+            if (y >= ym && !isSettled(card, y)) finiteAhead += Math.max(0, sum(l.filter(o => o.kind !== 'fixed')) - paidAmount(data, card.id, y));
+        }
         upcoming.push({
-            ym, ...invoiceDates(card, ym), total, fixed, count: items.length,
+            ym, ...invoiceDates(card, ym), total, fixed, count: list.length,
+            paid: paidAmount(data, card.id, ym),
             free: i === 0 ? freeForecast : limit - finiteAhead - fixed
         });
     }
 
-    const closedUnpaid = firstUnpaid !== openYm ? cardInvoice(data, card, firstUnpaid, todayKey) : null;
-    return { openYm, firstUnpaid, closedUnpaid, limit, used, fixedPending, futureInstallments, free, freeForecast, upcoming };
+    pending.sort((a, b) => a.ym.localeCompare(b.ym));
+    return { openYm, pending, limit, used, fixedPending, futureInstallments, free, freeForecast, upcoming };
 }
 
 // ── Saldos e resumos ──────────────────────────────────────────────────
 /**
  * Saldo de cada conta no fim do dia `uptoKey`: saldo inicial + receitas −
- * despesas da conta − faturas de cartão debitadas dela até essa data
- * (a fatura sai da conta de pagamento do cartão no dia do vencimento).
+ * despesas − pagamentos de fatura ± transferências. Para datas futuras, as
+ * faturas ainda não pagas que vencem até lá entram como se fossem pagas no
+ * vencimento pela conta de pagamento do cartão (previsão).
  */
-export function balances(data, uptoKey) {
+export function balances(data, uptoKey, todayKey = toDateKey(new Date())) {
     const fin = data.finance;
     const map = new Map(fin.accounts.map(a => [a.id, num(a.initial)]));
     const add = (id, v) => { if (map.has(id)) map.set(id, map.get(id) + v); };
@@ -384,15 +438,33 @@ export function balances(data, uptoKey) {
         expandEntry(e, '0000-01-01', uptoKey).forEach(o => add(o.accountId, o.type === 'income' ? o.amount : -o.amount));
     });
     napistaOccurrences(data, '0000-01-01', uptoKey).forEach(o => add(o.accountId, o.type === 'income' ? o.amount : -o.amount));
+    fin.payments.forEach(p => { if (p.date <= uptoKey) add(p.accountId, -p.amount); });
+    fin.transfers.forEach(t => { if (t.date <= uptoKey) { add(t.fromId, -t.amount); add(t.toId, t.amount); } });
 
-    fin.cards.forEach(card => {
-        cardEntries(data, card.id).forEach(e => {
-            expandEntry(e, '0000-01-01', uptoKey).forEach(o => {
-                if (invoiceDates(card, invoiceFor(card, o.date)).due <= uptoKey) add(card.accountId, -o.amount);
-            });
+    if (uptoKey > todayKey) {
+        fin.cards.forEach(card => {
+            for (const [ym, list] of cardInvoices(data, card, uptoKey, uptoKey)) {
+                if (isSettled(card, ym) || invoiceDates(card, ym).due > uptoKey) continue;
+                const left = list.reduce((a, o) => a + o.amount, 0) - paidAmount(data, card.id, ym);
+                if (left > 0.005) add(card.accountId, -left);
+            }
         });
-    });
+    }
     return map;
+}
+
+/** Transferências e pagamentos de fatura no intervalo (não são receita nem despesa). */
+export function movements(data, fromKey, toKey) {
+    const fin = data.finance;
+    const out = [];
+    fin.transfers.forEach(t => {
+        if (t.date >= fromKey && t.date <= toKey) out.push({ id: `tr:${t.id}`, kind: 'transfer', transfer: t, date: t.date, amount: t.amount, desc: t.desc });
+    });
+    fin.payments.forEach(p => {
+        const card = fin.cards.find(c => c.id === p.cardId);
+        if (card && p.date >= fromKey && p.date <= toKey) out.push({ id: `pay:${p.id}`, kind: 'payment', payment: p, card, date: p.date, amount: p.amount, accountId: p.accountId });
+    });
+    return out;
 }
 
 export const totalBalance = (data, map) => data.finance.accounts.reduce((a, acc) => a + (map.get(acc.id) || 0), 0);
@@ -412,7 +484,7 @@ export function monthSummary(data, ym, todayKey) {
     // faturas que vencem neste mês (a fatura do mês "ym" vence nele)
     data.finance.cards.forEach(card => {
         const inv = cardInvoice(data, card, ym, todayKey);
-        if (inv.total > 0) r.invoices.push({ card, ...inv });
+        if (inv.total > 0 && inv.status !== 'settled') r.invoices.push({ card, ...inv });
     });
     r.invoiceTotal = r.invoices.reduce((a, i) => a + i.total, 0);
     return r;
@@ -426,8 +498,8 @@ export function upcoming(data, todayKey, days = 10) {
     data.finance.cards.forEach(card => {
         for (const ym of [ymOf(from), ymShift(ymOf(from), 1)]) {
             const inv = cardInvoice(data, card, ym, todayKey);
-            if (inv.due >= from && inv.due <= to && inv.total > 0) {
-                items.push({ id: `inv:${card.id}:${ym}`, invoice: true, card, date: inv.due, amount: inv.total, type: 'expense', desc: `Fatura ${card.name}` });
+            if (inv.due >= from && inv.due <= to && inv.remaining > 0.005) {
+                items.push({ id: `inv:${card.id}:${ym}`, invoice: true, card, ym, date: inv.due, amount: inv.remaining, type: 'expense', desc: `Fatura ${card.name}` });
             }
         }
     });
@@ -440,6 +512,8 @@ export function usage(data, { accountId, categoryId }) {
     if (accountId) {
         return fin.entries.filter(e => e.accountId === accountId).length
             + fin.cards.filter(c => c.accountId === accountId).length
+            + fin.payments.filter(p => p.accountId === accountId).length
+            + fin.transfers.filter(t => t.fromId === accountId || t.toId === accountId).length
             + (fin.integration.accountId === accountId ? 1 : 0);
     }
     if (categoryId) return fin.entries.filter(e => e.categoryId === categoryId || Object.values(e.overrides || {}).some(o => o.categoryId === categoryId)).length;
