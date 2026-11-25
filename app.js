@@ -1,7 +1,7 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.4.0';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.4.0';
-import * as L from './logic.js?v=2.4.0';
-import * as P from './plans.js?v=2.4.0';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.4.1';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.4.1';
+import * as L from './logic.js?v=2.4.1';
+import * as P from './plans.js?v=2.4.1';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
