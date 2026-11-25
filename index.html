@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=2.4.1">
+    <link rel="stylesheet" href="style.css?v=2.5.0">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -25,11 +25,17 @@
     <header class="appbar" id="appbar" hidden>
         <div class="brand">
             <img src="./icon.svg" alt="" width="30" height="30">
-            <span>Na Pista</span>
+            <span id="brand-name">Na Pista</span>
         </div>
-        <button type="button" class="sync-pill" id="sync-pill" data-state="saved" aria-live="polite">
-            <span class="sync-dot"></span><span id="sync-label">Salvo</span>
-        </button>
+        <div class="appbar-actions">
+            <button type="button" class="mode-switch" id="btn-switch-mode" hidden aria-label="Abrir a Gestão na Pista" title="Alternar entre Na Pista e Gestão na Pista">
+                <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4 3 8l4 4M3 8h13a4 4 0 0 1 4 4M17 20l4-4-4-4M21 16H8a4 4 0 0 1-4-4"/></svg>
+                <span id="mode-switch-label">Gestão</span>
+            </button>
+            <button type="button" class="sync-pill" id="sync-pill" data-state="saved" aria-live="polite">
+                <span class="sync-dot"></span><span id="sync-label">Salvo</span>
+            </button>
+        </div>
     </header>
 
     <main id="app">
@@ -197,6 +203,7 @@
                     </label>
                 </div>
                 <p class="hint">Consumo e preço em branco usam suas médias. Tudo é salvo automaticamente.</p>
+                <p class="fin-day-hint" id="fin-day-hint" hidden></p>
             </section>
 
             <section class="card">
@@ -326,7 +333,30 @@
                 </div>
             </section>
             <p class="made-by"><span class="covem-mark" aria-hidden="true"></span>Um app Covem.</p>
-            <p class="version">Na Pista · v2.4.1</p>
+            <p class="version">Na Pista · v2.5.0</p>
+        </section>
+        <!-- ═════════ GESTÃO NA PISTA ═════════ -->
+        <section id="fin-home-screen" class="screen">
+            <div id="fin-home-body"></div>
+        </section>
+
+        <section id="fin-entries-screen" class="screen">
+            <div class="page-head"><h1>Lançamentos</h1></div>
+            <div id="fin-entries-body"></div>
+        </section>
+
+        <section id="fin-cards-screen" class="screen">
+            <div class="page-head page-head-row">
+                <h1>Cartões</h1>
+                <button type="button" class="btn btn-soft btn-sm btn-icon-text" data-new-card-head><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Novo cartão</button>
+            </div>
+            <div id="fin-cards-body"></div>
+        </section>
+
+        <section id="fin-accounts-screen" class="screen">
+            <div class="page-head"><h1>Contas e ajustes</h1></div>
+            <div id="fin-accounts-body"></div>
+            <p class="made-by"><span class="covem-mark" aria-hidden="true"></span>Um app Covem.</p>
         </section>
     </main>
 
@@ -349,6 +379,30 @@
             <span>Ajustes</span>
         </button>
     </nav>
+
+    <!-- Navegação da Gestão na Pista -->
+    <nav class="bottom-nav" id="gestao-nav" hidden aria-label="Navegação da Gestão na Pista">
+        <button type="button" class="nav-item" data-target="fin-home-screen">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9v9z"/><path d="M12 3a9 9 0 0 1 9 9h-9"/></svg>
+            <span>Resumo</span>
+        </button>
+        <button type="button" class="nav-item" data-target="fin-entries-screen">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+            <span>Lançamentos</span>
+        </button>
+        <button type="button" class="nav-item" data-target="fin-cards-screen">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg>
+            <span>Cartões</span>
+        </button>
+        <button type="button" class="nav-item" data-target="fin-accounts-screen">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10h18M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 21h18M12 3l9 5H3z"/></svg>
+            <span>Contas</span>
+        </button>
+    </nav>
+
+    <button type="button" class="fab" id="fin-fab" hidden aria-label="Novo lançamento">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
 
     <!-- Diálogo: gasto -->
     <dialog id="expense-dialog" class="sheet" aria-labelledby="expense-dialog-title">
@@ -441,12 +495,194 @@
         </div>
     </dialog>
 
+    <!-- Diálogo: escolha (ex.: alterar só este / todos) -->
+    <dialog id="choice-dialog" class="sheet" aria-labelledby="choice-title">
+        <div class="dialog-body">
+            <h2 id="choice-title">Escolha</h2>
+            <p class="muted" id="choice-message"></p>
+            <div class="stack" id="choice-options"></div>
+            <div class="dialog-actions"><button type="button" class="btn btn-ghost" id="choice-cancel">Cancelar</button></div>
+        </div>
+    </dialog>
+
+    <!-- Gestão: primeiro acesso -->
+    <dialog id="fin-onboard-dialog" class="sheet" aria-labelledby="fin-onboard-title">
+        <form id="fin-onboard-form" class="dialog-body" novalidate>
+            <h2 id="fin-onboard-title">Bem-vindo à Gestão na Pista</h2>
+            <p class="muted small">Controle todo o seu dinheiro: contas, despesas, receitas e cartões de crédito. Os ganhos que você lança no Na Pista entram aqui sozinhos.</p>
+            <div class="field" style="margin-top:16px">
+                <span class="field-label">Qual valor dos apps você quer enviar para a gestão?</span>
+                <div class="option-cards" id="fin-onboard-mode" role="group" aria-label="Valor enviado">
+                    <button type="button" class="option-card" data-mode="net" aria-pressed="false">
+                        <strong>Líquido</strong>
+                        <span>O que sobra no bolso: o faturamento menos o combustível estimado e os gastos do dia lançados no Na Pista.</span>
+                    </button>
+                    <button type="button" class="option-card" data-mode="gross" aria-pressed="false">
+                        <strong>Bruto</strong>
+                        <span>Tudo o que os apps pagaram. Você lança o combustível e os outros custos aqui na gestão.</span>
+                    </button>
+                </div>
+            </div>
+            <label class="field">
+                <span class="field-label">Quanto você tem hoje na carteira? (opcional)</span>
+                <span class="input-wrap"><span class="prefix">R$</span><input type="text" inputmode="numeric" id="fin-onboard-initial" class="money" placeholder="0,00" autocomplete="off"></span>
+            </label>
+            <div class="field" id="fin-onboard-history">
+                <span class="field-label">Ganhos que já estão lançados no Na Pista</span>
+                <div class="seg" role="tablist" id="fin-onboard-since" aria-label="A partir de quando">
+                    <button type="button" role="tab" class="seg-btn active" data-since="today" aria-selected="true">A partir de hoje</button>
+                    <button type="button" role="tab" class="seg-btn" data-since="month" aria-selected="false">Deste mês</button>
+                    <button type="button" role="tab" class="seg-btn" data-since="all" aria-selected="false">Todos</button>
+                </div>
+                <p class="hint" style="margin-top:0">Você pode mudar isso depois em Contas.</p>
+            </div>
+            <div class="dialog-actions">
+                <button type="button" class="btn btn-ghost" data-close>Agora não</button>
+                <button type="submit" class="btn btn-primary" id="fin-onboard-start" disabled>Começar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Gestão: lançamento -->
+    <dialog id="fin-entry-dialog" class="sheet" aria-labelledby="fin-entry-title">
+        <form id="fin-entry-form" class="dialog-body" novalidate>
+            <h2 id="fin-entry-title">Novo lançamento</h2>
+            <div class="seg seg-type" role="tablist" id="fin-entry-type" aria-label="Tipo">
+                <button type="button" role="tab" class="seg-btn" data-entry-type="expense">Despesa</button>
+                <button type="button" role="tab" class="seg-btn" data-entry-type="income">Receita</button>
+                <button type="button" role="tab" class="seg-btn" data-entry-type="card">Cartão</button>
+            </div>
+            <label class="field">
+                <span class="field-label" id="fin-entry-amount-label">Valor</span>
+                <span class="input-wrap input-big"><span class="prefix">R$</span><input type="text" inputmode="numeric" id="fin-entry-amount" class="money" placeholder="0,00" autocomplete="off"></span>
+            </label>
+            <label class="field">
+                <span class="field-label">Descrição</span>
+                <input type="text" id="fin-entry-desc" maxlength="60" placeholder="Ex: Aluguel, Netflix, Mercado" autocomplete="off">
+            </label>
+            <div class="grid-2">
+                <label class="field">
+                    <span class="field-label">Data</span>
+                    <input type="date" id="fin-entry-date">
+                </label>
+                <label class="field" id="fin-entry-account-field">
+                    <span class="field-label">Conta</span>
+                    <select id="fin-entry-account"></select>
+                </label>
+                <label class="field" id="fin-entry-card-field" hidden>
+                    <span class="field-label">Cartão</span>
+                    <select id="fin-entry-card"></select>
+                </label>
+            </div>
+            <div class="field">
+                <span class="field-label">Categoria</span>
+                <div class="chips chips-sm cat-chips" id="fin-entry-cats" role="group" aria-label="Categoria"></div>
+            </div>
+            <div class="field">
+                <span class="field-label">Lançamento</span>
+                <div class="seg seg-rec" role="tablist" id="fin-entry-rec" aria-label="Repetição">
+                    <button type="button" role="tab" class="seg-btn active" data-rec="once">Único</button>
+                    <button type="button" role="tab" class="seg-btn" data-rec="fixed">Fixo</button>
+                    <button type="button" role="tab" class="seg-btn" data-rec="repeat">Repetir</button>
+                    <button type="button" role="tab" class="seg-btn" data-rec="installment" id="fin-rec-installment">Parcelar</button>
+                </div>
+                <div class="grid-2" id="fin-rec-fixed" hidden>
+                    <label class="field"><span class="field-label">Repete a cada</span>
+                        <select id="fin-entry-fixed-freq"><option value="monthly">Mês</option><option value="weekly">Semana</option><option value="yearly">Ano</option></select>
+                    </label>
+                </div>
+                <div class="grid-2" id="fin-rec-repeat" hidden>
+                    <label class="field"><span class="field-label">Quantas vezes</span>
+                        <span class="input-wrap"><input type="text" inputmode="numeric" id="fin-entry-count" class="integer" placeholder="12" maxlength="3" autocomplete="off"><span class="suffix">vezes</span></span>
+                    </label>
+                    <label class="field"><span class="field-label">A cada</span>
+                        <select id="fin-entry-freq"><option value="monthly">Mês</option><option value="weekly">Semana</option><option value="yearly">Ano</option></select>
+                    </label>
+                </div>
+                <div class="grid-2" id="fin-rec-inst" hidden>
+                    <label class="field"><span class="field-label">Parcelas</span>
+                        <span class="input-wrap"><input type="text" inputmode="numeric" id="fin-entry-installments" class="integer" placeholder="10" maxlength="2" autocomplete="off"><span class="suffix">x</span></span>
+                    </label>
+                </div>
+                <p class="hint" id="fin-rec-hint" hidden style="margin-top:0"></p>
+            </div>
+            <div class="preview" id="fin-entry-preview" hidden></div>
+            <div class="dialog-actions">
+                <button type="button" class="btn btn-danger-ghost btn-fit" id="fin-entry-delete" hidden aria-label="Excluir lançamento"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg></button>
+                <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+                <button type="submit" class="btn btn-primary">Salvar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Gestão: cartão -->
+    <dialog id="fin-card-dialog" class="sheet" aria-labelledby="fin-card-title">
+        <form id="fin-card-form" class="dialog-body" novalidate>
+            <h2 id="fin-card-title">Novo cartão de crédito</h2>
+            <label class="field">
+                <span class="field-label">Nome do cartão</span>
+                <input type="text" id="fin-card-name" maxlength="30" placeholder="Ex: Nubank, Inter, Itaú" autocomplete="off">
+            </label>
+            <label class="field">
+                <span class="field-label">Limite total</span>
+                <span class="input-wrap"><span class="prefix">R$</span><input type="text" inputmode="numeric" id="fin-card-limit" class="money" placeholder="2.000,00" autocomplete="off"></span>
+            </label>
+            <div class="grid-2">
+                <label class="field"><span class="field-label">Dia do fechamento</span>
+                    <input type="text" inputmode="numeric" id="fin-card-closing" class="integer" maxlength="2" placeholder="3" autocomplete="off">
+                </label>
+                <label class="field"><span class="field-label">Dia do vencimento</span>
+                    <input type="text" inputmode="numeric" id="fin-card-due" class="integer" maxlength="2" placeholder="10" autocomplete="off">
+                </label>
+            </div>
+            <label class="field">
+                <span class="field-label">Fatura paga pela conta</span>
+                <select id="fin-card-account"></select>
+            </label>
+            <div class="field">
+                <span class="field-label">Cor</span>
+                <div class="swatches" id="fin-card-colors" role="group" aria-label="Cor do cartão"></div>
+            </div>
+            <p class="hint">Compras feitas no dia do fechamento ou depois vão para a fatura seguinte. No vencimento, o valor da fatura sai da conta escolhida.</p>
+            <div class="dialog-actions">
+                <button type="button" class="btn btn-danger-ghost btn-fit" id="fin-card-delete" hidden aria-label="Excluir cartão"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg></button>
+                <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+                <button type="submit" class="btn btn-primary">Salvar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Gestão: conta -->
+    <dialog id="fin-account-dialog" class="sheet" aria-labelledby="fin-account-title">
+        <form id="fin-account-form" class="dialog-body" novalidate>
+            <h2 id="fin-account-title">Nova conta</h2>
+            <label class="field">
+                <span class="field-label">Nome</span>
+                <input type="text" id="fin-account-name" maxlength="30" placeholder="Ex: Nubank, Caixa, Poupança" autocomplete="off">
+            </label>
+            <label class="field">
+                <span class="field-label">Tipo</span>
+                <select id="fin-account-kind"></select>
+            </label>
+            <label class="field">
+                <span class="field-label">Saldo inicial</span>
+                <span class="input-wrap"><span class="prefix">R$</span><input type="text" inputmode="numeric" id="fin-account-initial" class="money" placeholder="0,00" autocomplete="off"></span>
+            </label>
+            <label class="check"><input type="checkbox" id="fin-account-negative"><span>Saldo inicial negativo (cheque especial)</span></label>
+            <div class="dialog-actions">
+                <button type="button" class="btn btn-danger-ghost btn-fit" id="fin-account-delete" hidden aria-label="Excluir conta"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg></button>
+                <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+                <button type="submit" class="btn btn-primary">Salvar</button>
+            </div>
+        </form>
+    </dialog>
+
     <div class="toast" id="toast" role="status" aria-live="polite">
         <span id="toast-msg"></span>
         <button type="button" class="toast-action" id="toast-action" hidden></button>
     </div>
 
-    <script src="app.js?v=2.4.1" type="module"></script>
+    <script src="app.js?v=2.5.0" type="module"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {

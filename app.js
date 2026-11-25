@@ -1,7 +1,9 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.4.1';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.4.1';
-import * as L from './logic.js?v=2.4.1';
-import * as P from './plans.js?v=2.4.1';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.5.0';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.5.0';
+import * as L from './logic.js?v=2.5.0';
+import * as P from './plans.js?v=2.5.0';
+import * as F from './finance.js?v=2.5.0';
+import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.5.0';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -10,7 +12,9 @@ const PLATFORM_COLORS = ['#10b981', '#60a5fa', '#f59e0b', '#a78bfa', '#f472b6', 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const WEEKDAYS_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const MONTHS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
-const MAIN_SCREENS = ['dashboard-screen', 'reports-screen', 'goals-screen', 'profile-screen'];
+const NAPISTA_SCREENS = ['dashboard-screen', 'reports-screen', 'goals-screen', 'profile-screen'];
+const MAIN_SCREENS = [...NAPISTA_SCREENS, ...GESTAO_SCREENS];
+const MODE_KEY = 'napista_mode';        // último app aberto neste aparelho: 'napista' | 'gestao'
 const CACHE_KEY = 'napista_cache';     // cópia local dos dados (abre o app sem precisar de login)
 const OLD_PENDING_KEY = 'napista_pending';
 const PULL_INTERVAL_MS = 5 * 60 * 1000;
@@ -133,6 +137,7 @@ function normalizeData(raw) {
         if (!Number.isFinite(g.priority)) delete g.priority;
         delete g.showOnHome; // opção antiga "mostrar no início", não usada mais
     });
+    data.finance = F.normalizeFinance(data.finance);
     return data;
 }
 
@@ -149,6 +154,28 @@ function toast(message, { type = 'info', action, onAction, duration = 3500 } = {
     el.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => el.classList.remove('show'), duration);
+}
+
+/** Pergunta com várias opções (ex.: "Só este", "Todos"). Resolve o `value` escolhido ou null. */
+function choiceDialog({ title, message = '', options }) {
+    const dlg = $('choice-dialog');
+    $('choice-title').textContent = title;
+    $('choice-message').textContent = message;
+    $('choice-message').hidden = !message;
+    const box = $('choice-options');
+    box.innerHTML = options.map((o, i) => `<button type="button" class="btn ${o.danger ? 'btn-danger-ghost' : i === 0 ? 'btn-primary' : 'btn-ghost'}" data-choice="${i}">${esc(o.label)}</button>`).join('');
+    return new Promise(resolve => {
+        let result = null;
+        box.onclick = (e) => {
+            const b = e.target.closest('[data-choice]');
+            if (!b) return;
+            result = options[Number(b.dataset.choice)].value;
+            dlg.close();
+        };
+        $('choice-cancel').onclick = () => dlg.close();
+        dlg.onclose = () => resolve(result);
+        dlg.showModal();
+    });
 }
 
 function confirmDialog({ title, message, confirmLabel = 'Confirmar', danger = false }) {
@@ -353,7 +380,8 @@ function syncNow() {
 function rerenderAfterSync() {
     renderPlatformInputs();
     const active = document.querySelector('.screen.active')?.id;
-    if (active === 'dashboard-screen') renderDashboard();
+    if (GESTAO_SCREENS.includes(active)) gestao.render(active);
+    else if (active === 'dashboard-screen') renderDashboard();
     else if (active === 'reports-screen') renderReports();
     else if (active === 'goals-screen') renderGoals();
     else if (active === 'profile-screen') renderProfile();
@@ -364,9 +392,20 @@ function rerenderAfterSync() {
 function showScreen(id) {
     document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === id));
     const isMain = MAIN_SCREENS.includes(id);
-    $('bottom-nav').hidden = !isMain;
+    const isGestao = GESTAO_SCREENS.includes(id);
+    $('bottom-nav').hidden = !isMain || isGestao;
+    $('gestao-nav').hidden = !isGestao;
+    $('fin-fab').hidden = !isGestao;
     $('appbar').hidden = !(isMain || id === 'setup-screen');
     document.body.classList.toggle('has-nav', isMain);
+    document.body.classList.toggle('mode-gestao', isGestao);
+    $('brand-name').textContent = isGestao ? 'Gestão na Pista' : 'Na Pista';
+    // o botão de troca aparece nas telas principais (não no cadastro inicial)
+    const sw = $('btn-switch-mode');
+    sw.hidden = !isMain;
+    $('mode-switch-label').textContent = isGestao ? 'Na Pista' : 'Gestão';
+    sw.setAttribute('aria-label', isGestao ? 'Voltar para o Na Pista' : 'Abrir a Gestão na Pista');
+    if (isMain) setLastMode(isGestao ? 'gestao' : 'napista');
     document.querySelectorAll('.nav-item').forEach(b => {
         const active = b.dataset.target === id;
         b.classList.toggle('active', active);
@@ -378,7 +417,42 @@ function showScreen(id) {
     if (id === 'reports-screen') renderReports();
     if (id === 'goals-screen') renderGoals();
     if (id === 'profile-screen') renderProfile();
+    if (isGestao) gestao.render(id);
     renderAds();
+}
+
+// ── Na Pista ⇄ Gestão na Pista ──
+function getLastMode() {
+    try { return localStorage.getItem(MODE_KEY) === 'gestao' ? 'gestao' : 'napista'; } catch { return 'napista'; }
+}
+
+function setLastMode(mode) {
+    try { localStorage.setItem(MODE_KEY, mode); } catch { /* ignora */ }
+}
+
+/** Abre a Gestão na Pista (no primeiro acesso, pergunta líquido ou bruto). */
+function openGestao() {
+    if (!P.can.finance()) {
+        openPlans('completo', 'A Gestão na Pista (contas, cartões, despesas e receitas) faz parte do plano Completo.');
+        return false;
+    }
+    gestao.resetMonth();
+    showScreen('fin-home-screen');
+    if (gestao.needsOnboarding()) gestao.openOnboarding();
+    return true;
+}
+
+function switchMode() {
+    const active = document.querySelector('.screen.active')?.id;
+    if (GESTAO_SCREENS.includes(active)) showScreen('dashboard-screen');
+    else openGestao();
+}
+
+/** Abre um dia no Na Pista (usado pelos lançamentos que vêm dos apps). */
+function openNaPistaDay(key) {
+    state.scope = 'day';
+    state.anchor = state.dayAnchor = L.parseDateKey(key);
+    showScreen('dashboard-screen');
 }
 
 function showLoading(message = 'Carregando…') {
@@ -429,8 +503,8 @@ function openWithData(data, fileId, dirty = false) {
     if (dirty) changeVersion = 1;
     writeCache();
     renderPlatformInputs();
-    if (L.isConfigured(state.data.settings)) showScreen('dashboard-screen');
-    else openSetup();
+    if (!L.isConfigured(state.data.settings)) openSetup();
+    else if (getLastMode() !== 'gestao' || !openGestao()) showScreen('dashboard-screen');
     renderPlanUI();
 }
 
@@ -795,6 +869,14 @@ function renderStats(sum) {
     $('stat-km').textContent = `${fmt(sum.km, sum.km % 1 ? 1 : 0)} km`;
     $('stat-km-sub').textContent = sum.km > 0 && sum.gross > 0 ? `${brl(sum.grossPerKm)}/km` : '';
     $('day-gross-total').textContent = brl(sum.gross);
+    renderFinanceDayHint();
+}
+
+function renderFinanceDayHint() {
+    const el = $('fin-day-hint');
+    const text = state.scope === 'day' && P.can.finance() ? gestao.dayHint(dayKey()) : '';
+    el.hidden = !text;
+    el.textContent = text;
 }
 
 function renderExpenses(sum) {
@@ -1461,7 +1543,7 @@ async function handleLogout() {
 async function handleWipe() {
     const ok = await confirmDialog({
         title: 'Apagar todos os dados?',
-        message: 'Suas metas e todo o histórico serão apagados do Google Drive permanentemente. Considere baixar um backup antes.',
+        message: 'Suas metas, todo o histórico e a Gestão na Pista (contas, cartões e lançamentos) serão apagados do Google Drive permanentemente. Considere baixar um backup antes.',
         confirmLabel: 'Apagar tudo',
         danger: true
     });
@@ -1479,7 +1561,7 @@ async function handleWipe() {
         await deleteData(state.fileId);
         resetSync();
         state.fileId = null;
-        state.data = L.createDefaultData();
+        state.data = normalizeData(L.createDefaultData());
         writeCache();
         state.reportKey = null;
         toast('Dados apagados. Vamos configurar do zero.');
@@ -1496,7 +1578,7 @@ const PLAN_FEATURES = {
     free: ['Lançamento diário de ganhos, km e gastos', 'Meta mensal definida no cadastro', 'Relatórios por dia, semana e mês', 'Com anúncios'],
     semanuncios: ['Tudo do plano Grátis', 'Sem anúncios'],
     medio: ['Tudo do plano Sem anúncios', 'Criar metas com prazo (IPVA, pneus, férias…)'],
-    completo: ['Tudo do plano Médio', 'Controle financeiro completo: despesas da casa e do carro e para onde vai o que você ganha']
+    completo: ['Tudo do plano Médio', 'Gestão na Pista: contas, cartões de crédito, despesas fixas e parceladas, e para onde vai o que você ganha']
 };
 
 /** Busca o plano na API (sem abrir popup) e atualiza a tela se mudou. */
@@ -1720,10 +1802,12 @@ function bindEvents() {
         if (toggleWeekday(e, state.setupWeekdays)) updateSetupPreview();
     });
 
-    // Navegação inferior
+    // Navegação inferior (Na Pista e Gestão)
     document.querySelectorAll('.nav-item').forEach(btn => {
         btn.addEventListener('click', () => showScreen(btn.dataset.target));
     });
+    $('btn-switch-mode').addEventListener('click', switchMode);
+    gestao.bind();
 
     // Dashboard
     document.querySelectorAll('#scope-seg .seg-btn').forEach(btn => {
@@ -1850,6 +1934,7 @@ function bindEvents() {
             if (hasValidToken() && (hasUnsaved() || Date.now() - lastPull > PULL_INTERVAL_MS)) syncWithDrive();
             // ao voltar ao app num novo dia, atualiza o "hoje"
             if ($('dashboard-screen').classList.contains('active')) { renderDateNav(); renderGoalWidget(); }
+            else gestao.rerender();
         }
     });
 }
@@ -1857,6 +1942,15 @@ function bindEvents() {
 // Erros inesperados aparecem na tela em vez de o botão simplesmente "não fazer nada"
 window.addEventListener('error', (e) => toast(`Erro inesperado: ${e.message || 'desconhecido'}. Recarregue o app.`, { type: 'error', duration: 8000 }));
 window.addEventListener('unhandledrejection', (e) => console.error('Promise rejeitada:', e.reason));
+
+const gestao = createGestao({
+    $, brl, esc, toast, confirmDialog, choiceDialog, parseDecimal, moneyInput,
+    data: () => state.data,
+    markChanged,
+    showScreen,
+    openNaPistaDay,
+    leave: () => showScreen('dashboard-screen')
+});
 
 bindEvents();
 boot();
