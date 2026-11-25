@@ -1,7 +1,7 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.3.0';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.3.0';
-import * as L from './logic.js?v=2.3.0';
-import * as P from './plans.js?v=2.3.0';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.3.1';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.3.1';
+import * as L from './logic.js?v=2.3.1';
+import * as P from './plans.js?v=2.3.1';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -1051,11 +1051,25 @@ function goalEval() {
     return L.evaluateGoals(goals(), settings(), state.data.history, new Date());
 }
 
+/** Faturamento bruto estimado para sobrar `net` de líquido (média de R$/km menos o combustível). */
+function toGross(net) {
+    const s = settings();
+    const custoKm = L.num(s.mediaConsumoL) > 0 ? L.num(s.mediaPrecoCombustivel) / L.num(s.mediaConsumoL) : 0;
+    const lucroKm = L.num(s.mediaPagamentoKm) - custoKm;
+    return lucroKm > 0 ? net / lucroKm * L.num(s.mediaPagamentoKm) : null;
+}
+
+/** "R$ X brutos (R$ Y líquidos)"; sem lucro por km, mostra só o líquido. */
+function grossText(net) {
+    const g = toGross(net);
+    return g == null ? `<strong>${brl(net)}</strong> líquidos` : `<strong>${brl(g)}</strong> brutos (${brl(net)} líquidos)`;
+}
+
 function goalTodayLine(r) {
     if (r.status !== 'active') return '';
-    if (!r.todayIsWork) return `<p class="goal-today">Hoje não é dia de trabalho nesta meta. Próximos dias: ${brl(r.porDia)} líquidos por dia.</p>`;
+    if (!r.todayIsWork) return `<p class="goal-today">Hoje não é dia de trabalho nesta meta. Próximos dias: faturar ${grossText(r.porDia)} por dia.</p>`;
     if (r.hojeFalta <= 0) return '<p class="goal-today ok">Ritmo de hoje cumprido para esta meta.</p>';
-    return `<p class="goal-today">Hoje faltam <strong>${brl(r.hojeFalta)}</strong> líquidos para ficar no ritmo.</p>`;
+    return `<p class="goal-today">Hoje faltam ${grossText(r.hojeFalta)} para ficar no ritmo.</p>`;
 }
 
 /** Card "para bater todas as metas". `compact` = versão da tela Início. */
@@ -1065,13 +1079,13 @@ function combinedCard(c, open, compact = false) {
         ? '<p class="goal-today">Hoje não é dia de trabalho em nenhuma meta em andamento.</p>'
         : c.hojeFalta <= 0
             ? '<p class="goal-today ok">Ritmo de hoje cumprido para todas as metas.</p>'
-            : `<p class="goal-today">Hoje faltam <strong>${brl(c.hojeFalta)}</strong> líquidos para ficar no ritmo de todas.</p>`;
-    const extra = c.kmPorDia > 0
-        ? `<span>≈ ${brl(c.brutoPorDia)} bruto · ≈ ${fmt(c.kmPorDia, 0)} km por dia</span>` : '';
+            : `<p class="goal-today">Hoje faltam ${grossText(c.hojeFalta)} para ficar no ritmo de todas.</p>`;
+    const gross = c.kmPorDia > 0;
+    const extra = gross ? `<span>${brl(c.porDia)} líquidos · ≈ ${fmt(c.kmPorDia, 0)} km por dia</span>` : '';
     return `
     <div class="goal-total${compact ? ' compact' : ''}">
         <span class="goal-total-label">Para bater ${open.length === 1 ? 'a meta' : `as ${open.length} metas`}</span>
-        <span class="goal-total-value">${brl(c.porDia)}<small>/dia líquido</small></span>
+        <span class="goal-total-value">${gross ? `${brl(c.brutoPorDia)}<small>/dia de faturamento</small>` : `${brl(c.porDia)}<small>/dia líquido</small>`}</span>
         <div class="goal-mini-line"><span>Falta <strong>${brl(falta)}</strong> no total</span><span>${plural(c.diasTrabalho, 'dia de trabalho', 'dias de trabalho')} até ${fullDate(c.lastDeadline)}</span></div>
         ${extra ? `<div class="goal-mini-line">${extra}</div>` : ''}
         ${today}
@@ -1082,7 +1096,7 @@ function goalMini(r) {
     const pct = Math.round(r.progress * 100);
     const sub = r.status === 'scheduled'
         ? `Começa em ${fullDate(r.goal.startDate)}`
-        : `${brl(r.porDia)}/dia · ${plural(r.diasRestantes, 'dia', 'dias')} até ${fullDate(r.goal.deadline)}`;
+        : `${brl(r.brutoPorDia > 0 ? r.brutoPorDia : r.porDia)}/dia ${r.brutoPorDia > 0 ? 'bruto' : 'líquido'} · ${plural(r.diasRestantes, 'dia', 'dias')} até ${fullDate(r.goal.deadline)}`;
     return `
     <div class="goal-mini">
         <div class="goal-mini-head"><span class="goal-mini-name">${esc(goalTitle(r.goal))}</span><span class="goal-mini-pct">${pct}%</span></div>
@@ -1158,10 +1172,12 @@ function goalCard(r, ctx) {
         const lucroOk = r.kmPorDia > 0;
         details = `
             <div class="stat-grid">
-                <div class="stat"><span class="stat-label">Líquido por dia</span><span class="stat-value big">${brl(r.porDia)}</span><span class="stat-sub">${plural(r.diasRestantes, 'dia de trabalho', 'dias de trabalho')}</span></div>
+                ${lucroOk
+                    ? `<div class="stat"><span class="stat-label">Faturar por dia</span><span class="stat-value big">${brl(r.brutoPorDia)}</span><span class="stat-sub">bruto · ${plural(r.diasRestantes, 'dia de trabalho', 'dias de trabalho')}</span></div>`
+                    : `<div class="stat"><span class="stat-label">Líquido por dia</span><span class="stat-value big">${brl(r.porDia)}</span><span class="stat-sub">${plural(r.diasRestantes, 'dia de trabalho', 'dias de trabalho')}</span></div>`}
                 <div class="stat"><span class="stat-label">Falta</span><span class="stat-value">${brl(r.falta)}</span><span class="stat-sub">${plural(r.calendarDaysLeft, 'dia', 'dias')} no calendário</span></div>
                 ${lucroOk ? `
-                <div class="stat"><span class="stat-label">Faturar por dia</span><span class="stat-value">${brl(r.brutoPorDia)}</span><span class="stat-sub">bruto estimado</span></div>
+                <div class="stat"><span class="stat-label">Líquido por dia</span><span class="stat-value">${brl(r.porDia)}</span><span class="stat-sub">o que sobra no bolso</span></div>
                 <div class="stat"><span class="stat-label">Rodar por dia</span><span class="stat-value">≈ ${fmt(r.kmPorDia, 0)} km</span><span class="stat-sub">a ${brl(L.num(s.mediaPagamentoKm))}/km</span></div>` : ''}
             </div>
             ${r.status === 'scheduled' ? `<p class="goal-status">Começa a contar em ${fullDate(g.startDate)}.</p>` : goalTodayLine(r)}`;
@@ -1336,14 +1352,15 @@ function updateGoalPreview() {
         el.innerHTML = `<div class="preview-row"><span>Você já fez ${brl(r.net)} nesse período</span><strong>Meta batida</strong></div>`;
         return;
     }
-    const rows = [['Você precisa fazer por dia', `${brl(r.porDia)} líquidos`]];
+    const rows = r.brutoPorDia > 0
+        ? [['Você precisa faturar por dia', `≈ ${brl(r.brutoPorDia)} brutos`], ['Líquido por dia', brl(r.porDia)], ['Rodagem por dia', `≈ ${fmt(r.kmPorDia, 0)} km`]]
+        : [['Você precisa fazer por dia', `${brl(r.porDia)} líquidos`]];
     const openCount = results.filter(isOpenGoal).length;
-    if (r.brutoPorDia > 0) rows.push(['Faturamento bruto por dia', `≈ ${brl(r.brutoPorDia)}`], ['Rodagem por dia', `≈ ${fmt(r.kmPorDia, 0)} km`]);
     rows.push(['Dias de trabalho até a data', String(r.diasRestantes)]);
     if (r.net !== 0) rows.push(['Já conta para esta meta', brl(r.net)]);
     if (openCount > 1) {
         rows.push(['Prioridade', `${results.filter(isOpenGoal).indexOf(r) + 1}ª de ${openCount}`]);
-        if (combined) rows.push(['Para bater todas as metas', `${brl(combined.porDia)}/dia`]);
+        if (combined) rows.push(['Para bater todas as metas', combined.brutoPorDia > 0 ? `≈ ${brl(combined.brutoPorDia)}/dia brutos` : `${brl(combined.porDia)}/dia`]);
     }
     el.innerHTML = rows.map(([k, v]) => `<div class="preview-row"><span>${k}</span><strong>${v}</strong></div>`).join('');
 }
