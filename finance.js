@@ -1,6 +1,6 @@
 // Gestão na Pista: regras de finanças pessoais (contas, lançamentos e cartões).
 // Sem dependência de DOM. Datas sempre como "AAAA-MM-DD" no fuso do aparelho.
-import { num, toDateKey, parseDateKey, dayNet, dayGross, dayExpenses, dailyTarget, workWeekdays } from './logic.js?v=2.8.2';
+import { num, toDateKey, parseDateKey, dayNet, dayGross, dayExpenses, dailyTarget, workWeekdays, goalDailyExtras } from './logic.js?v=2.9.0';
 
 export const WALLET_ID = 'carteira';
 export const APPS_CATEGORY_ID = 'r_apps';
@@ -341,13 +341,16 @@ export function forecastOccurrences(data, fromKey, toKey, todayKey = toDateKey(n
     const launched = new Set(data.history.map(d => d.date));
     const weekdays = workWeekdays(data.settings);
     const perMonth = new Map();
+    // metas com prazo somadas à meta do dia também entram na previsão
+    const extras = goalDailyExtras(data.goals, data.settings, data.history, lo, toKey, parseDateKey(todayKey));
     const out = [];
     for (let k = lo; k <= toKey; k = addDaysKey(k, 1)) {
         const d = parseDateKey(k);
         if (launched.has(k) || !weekdays.includes(d.getDay())) continue;
         const ym = ymOf(k);
         if (!perMonth.has(ym)) perMonth.set(ym, Math.round(dailyTarget(data.settings, d) * 100) / 100);
-        const amount = perMonth.get(ym);
+        const extra = (extras.get(k) || []).reduce((a, x) => a + x.value, 0);
+        const amount = Math.round((perMonth.get(ym) + extra) * 100) / 100;
         if (amount < 0.005) continue;
         out.push({
             id: `fc:${k}`,

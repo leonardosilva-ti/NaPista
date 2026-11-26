@@ -875,3 +875,5 @@ body.mode-gestao .brand { gap: 8px; }
 .filter-clear { font-size: 0.82rem; font-weight: 600; color: var(--text-2); padding: 6px 4px; text-decoration: underline; }
 .filter-group { display: block; font-size: 0.74rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-3); margin: 4px 0 6px; }
 #fin-filter-cats .cat-chips { margin-bottom: 10px; }
+.goal-daily-field { padding: 12px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border); }
+.goal-daily { color: var(--info); }

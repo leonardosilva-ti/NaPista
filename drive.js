@@ -1,5 +1,5 @@
 // Persistência no Google Drive (pasta privada do app: appDataFolder).
-import { getToken, invalidateToken } from './auth.js?v=2.8.2';
+import { getToken, invalidateToken } from './auth.js?v=2.9.0';
 
 const FILENAME = 'napista_data.json';
 const API = 'https://www.googleapis.com/drive/v3/files';

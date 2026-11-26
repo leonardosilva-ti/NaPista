@@ -149,7 +149,7 @@ export function summarize(days, s) {
  * Calcula a situação da meta para o período (dia/semana/mês) que contém `anchor`.
  * Retorna quanto falta (líquido e bruto), km estimados e sugestão diária.
  */
-export function calculateTargets(scope, s, history, anchor, today = new Date()) {
+export function calculateTargets(scope, s, history, anchor, today = new Date(), goals = []) {
     const { start, end } = getPeriodRange(scope, anchor);
     const startKey = toDateKey(start);
     const endKey = toDateKey(end);
@@ -167,8 +167,16 @@ export function calculateTargets(scope, s, history, anchor, today = new Date()) 
     }
 
     const weekdays = workWeekdays(s);
-    const metaDia = dailyTarget(s, anchor);
-    const metaCheia = scope === 'day' ? metaDia
+    // metas com prazo somadas à meta do dia aumentam a meta dos dias do período delas
+    const extras = goalDailyExtras(goals, s, history, startKey, endKey, today);
+    let metaExtra = 0;
+    const metaExtraGoals = new Map();
+    extras.forEach(list => list.forEach(({ goal, value }) => {
+        metaExtra += value;
+        metaExtraGoals.set(goal, (metaExtraGoals.get(goal) || 0) + value);
+    }));
+    const metaDia = dailyTarget(s, anchor) + (scope === 'day' ? metaExtra : 0);
+    let metaCheia = scope === 'day' ? metaDia
         : scope === 'week' ? num(s.metaLiquidaMensal) / WEEKS_PER_MONTH
         : num(s.metaLiquidaMensal);
 
@@ -195,6 +203,10 @@ export function calculateTargets(scope, s, history, anchor, today = new Date()) 
         }
         if (dispensados > 0 && !antesDoInicio) inicioParcial = inicio;
     }
+    if (scope !== 'day' && !antesDoInicio) {
+        meta += metaExtra;
+        metaCheia += metaExtra;
+    }
 
     const status = endKey < todayKey ? 'past' : startKey > todayKey ? 'future' : 'current';
 
@@ -211,7 +223,11 @@ export function calculateTargets(scope, s, history, anchor, today = new Date()) 
 
     const faltaLiquido = meta - summary.net;
     const progress = meta > 0 ? Math.max(0, Math.min(1, summary.net / meta)) : 0;
-    const base = { scope, status, meta, metaCheia, metaDia, summary, progress, diasRestantes, inicioParcial };
+    const base = {
+        scope, status, meta, metaCheia, metaDia, summary, progress, diasRestantes, inicioParcial,
+        metaExtra: antesDoInicio ? 0 : metaExtra,
+        metaExtraGoals: antesDoInicio ? [] : [...metaExtraGoals].map(([goal, value]) => ({ goal, value }))
+    };
 
     if (antesDoInicio) {
         return { ...base, progress: 1, metaAlcancada: true, antesDoInicio: true, excedente: Math.max(0, summary.net) };
@@ -294,6 +310,56 @@ export function countWorkDays(from, to, weekdays = ALL_WEEKDAYS) {
 
 const goalWeekdaysOf = (g) => (Array.isArray(g.weekdays) && g.weekdays.length ? g.weekdays : ALL_WEEKDAYS);
 
+/** Meta com prazo que soma à meta do dia (a chave "Somar à meta do dia"). */
+export const isDailyGoal = (g) => g?.addToDaily === true;
+
+/** Quanto a meta acrescenta a cada dia de trabalho dela: valor ÷ dias de trabalho do período. */
+export function goalDailyShare(g) {
+    const n = countWorkDays(parseDateKey(g.startDate), parseDateKey(g.deadline), goalWeekdaysOf(g));
+    return n > 0 ? num(g.amount) / n : 0;
+}
+
+/** Meta normal de um dia (a do perfil); é o que fica fora das metas somadas à meta do dia. */
+function baseDayTarget(s, key) {
+    const d = parseDateKey(key);
+    return workWeekdays(s).includes(d.getDay()) ? dailyTarget(s, d) : 0;
+}
+
+/**
+ * Acréscimo de cada dia entre `fromKey` e `toKey` pelas metas somadas à meta do
+ * dia: Map(data → [{ goal, value }]). Cada dia de trabalho da meta recebe a parte
+ * dela, limitada ao que ainda faltava no começo do dia (meta batida para de somar).
+ */
+export function goalDailyExtras(goals, s, history, fromKey, toKey, today = new Date()) {
+    const out = new Map();
+    const daily = (goals || []).filter(g => isDailyGoal(g) && g.startDate <= toKey && g.deadline >= fromKey);
+    if (!daily.length) return out;
+    const alloc = allocateGoals(orderGoals(goals, today), history, s);
+    for (const g of daily) {
+        const share = goalDailyShare(g);
+        if (!(share > 0)) continue;
+        const wd = goalWeekdaysOf(g);
+        const trace = alloc.trace.get(g.id) || [];
+        const meta = num(g.amount);
+        const lo = g.startDate > fromKey ? g.startDate : fromKey;
+        const hi = g.deadline < toKey ? g.deadline : toKey;
+        let t = 0, got = 0;
+        for (let d = parseDateKey(lo), k = lo; k <= hi; d = addDays(d, 1), k = toDateKey(d)) {
+            while (t < trace.length && trace[t][0] < k) got = trace[t++][1];
+            if (!wd.includes(d.getDay())) continue;
+            const value = Math.min(share, Math.max(0, meta - got));
+            if (value < 0.005) continue;
+            if (!out.has(k)) out.set(k, []);
+            out.get(k).push({ goal: g, value });
+        }
+    }
+    return out;
+}
+
+/** Acréscimo total de um dia pelas metas somadas à meta do dia. */
+export const goalDailyExtra = (goals, s, history, key, today = new Date()) =>
+    (goalDailyExtras(goals, s, history, key, key, today).get(key) || []).reduce((a, x) => a + x.value, 0);
+
 /** Ordem automática: prazo mais próximo primeiro; prazo igual, menor valor primeiro. */
 export function goalAutoCompare(a, b) {
     return a.deadline.localeCompare(b.deadline)
@@ -343,29 +409,39 @@ export function allocateGoals(order, history, s, skipKey = null) {
     const keys = [...avail.keys()].sort();
     const out = new Map();
     out.gross = new Map();
+    out.trace = new Map(); // id → [[data, total recebido até esse dia]]
     for (const g of order) {
         const meta = num(g.amount);
+        const daily = isDailyGoal(g);
+        const trace = [];
         let got = 0, gross = 0;
         for (const k of keys) {
             if (k < g.startDate) continue;
             if (k > g.deadline || got >= meta) break;
-            const a = avail.get(k);
+            const total = avail.get(k);
+            // somada à meta do dia: só o que passa da meta normal do dia conta para ela
+            const reserve = daily && total > 0 ? Math.min(total, baseDayTarget(s, k)) : 0;
+            const a = total - reserve;
+            if (daily && !(a > 0)) continue;
             if (!a && !availGross.get(k)) continue;
             if (got + a <= meta) {
                 got += a;
-                gross += availGross.get(k);
-                avail.set(k, 0);
-                availGross.set(k, 0);
+                const part = reserve > 0 ? availGross.get(k) * (a / total) : availGross.get(k);
+                gross += part;
+                avail.set(k, reserve);
+                availGross.set(k, availGross.get(k) - part);
             } else {
                 const used = meta - got;
-                const part = availGross.get(k) * (used / a);
-                avail.set(k, a - used);
+                const part = availGross.get(k) * (used / (reserve > 0 ? total : a));
+                avail.set(k, total - used);
                 availGross.set(k, availGross.get(k) - part);
                 gross += part;
                 got = meta;
             }
+            trace.push([k, got]);
         }
         out.set(g.id, got);
+        out.trace.set(g.id, trace);
         out.gross.set(g.id, gross);
     }
     return out;
@@ -525,11 +601,14 @@ export function evaluateGoals(goals, s, history, today = new Date()) {
     results.forEach(r => { if (r.status !== 'active') left -= Math.max(0, (after.get(r.goal.id) || 0) - (before.get(r.goal.id) || 0)); });
     results.forEach(r => {
         if (r.status !== 'active' || !r.todayIsWork) return;
+        // somada à meta do dia: já recebeu na cascata só o que passou da meta normal
+        if (isDailyGoal(r.goal)) { left -= Math.max(0, r.todayNet); return; }
         const got = Math.max(0, Math.min(left, r.porDia));
         r.todayNet = got;
         r.hojeFalta = Math.max(0, r.porDia - got);
         left -= got;
     });
 
-    return { results, combined: combinedPlan(order, s, history, t, before) };
+    // as somadas à meta do dia já estão na meta do dia: ficam fora do "para bater todas"
+    return { results, combined: combinedPlan(order.filter(g => !isDailyGoal(g)), s, history, t, before) };
 }

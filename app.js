@@ -1,9 +1,9 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.8.2';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.8.2';
-import * as L from './logic.js?v=2.8.2';
-import * as P from './plans.js?v=2.8.2';
-import * as F from './finance.js?v=2.8.2';
-import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.8.2';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.9.0';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.9.0';
+import * as L from './logic.js?v=2.9.0';
+import * as P from './plans.js?v=2.9.0';
+import * as F from './finance.js?v=2.9.0';
+import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.9.0';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -136,6 +136,7 @@ function normalizeData(raw) {
         if (!Array.isArray(g.weekdays) || !g.weekdays.length) g.weekdays = [...L.ALL_WEEKDAYS];
         if (!Number.isFinite(g.priority)) delete g.priority;
         delete g.showOnHome; // opção antiga "mostrar no início", não usada mais
+        if (g.addToDaily !== true) delete g.addToDaily;
     });
     data.finance = F.normalizeFinance(data.finance);
     return data;
@@ -677,7 +678,7 @@ function renderDashboard() {
 }
 
 function refreshDashboard() {
-    const r = L.calculateTargets(state.scope, settings(), state.data.history, state.anchor, new Date());
+    const r = L.calculateTargets(state.scope, settings(), state.data.history, state.anchor, new Date(), goals());
     renderHero(r);
     renderStats(r.summary);
     renderExpenses(r.summary);
@@ -859,6 +860,13 @@ function renderHero(r) {
                 ? `Último dia de trabalho do período: ${brl(r.brutoFaltante)} brutos.`
                 : `Sugestão: ${brl(r.brutoPorDia)} por dia (≈ ${fmt(r.kmPorDia, 0)} km) nos próximos ${r.diasRestantes} dias de trabalho.`;
         }
+    }
+
+    if (r.metaExtra > 0.004) {
+        const names = r.metaExtraGoals.map(x => `"${goalTitle(x.goal)}"`).join(', ');
+        const note = `${r.metaExtraGoals.length === 1 ? 'Inclui' : 'Incluem'} ${brl(r.metaExtra)} da${r.metaExtraGoals.length === 1 ? ' meta' : 's metas'} ${names}.`;
+        tip.textContent = tip.hidden ? note : `${tip.textContent} ${note}`;
+        tip.hidden = false;
     }
 
     if (r.inicioParcial) {
@@ -1156,6 +1164,11 @@ function grossText(net) {
 
 function goalTodayLine(r) {
     if (r.status !== 'active') return '';
+    if (L.isDailyGoal(r.goal)) {
+        if (!r.todayIsWork) return '<p class="goal-today">Hoje não é dia de trabalho nesta meta.</p>';
+        if (r.hojeFalta <= 0) return '<p class="goal-today ok">Ritmo de hoje cumprido para esta meta.</p>';
+        return `<p class="goal-today">Hoje faltam ${grossText(r.hojeFalta)} além da meta normal do dia.</p>`;
+    }
     if (!r.todayIsWork) return `<p class="goal-today">Hoje não é dia de trabalho nesta meta. Próximos dias: faturar ${grossText(r.porDia)} por dia.</p>`;
     if (r.hojeFalta <= 0) return '<p class="goal-today ok">Ritmo de hoje cumprido para esta meta.</p>';
     return `<p class="goal-today">Hoje faltam ${grossText(r.hojeFalta)} para ficar no ritmo.</p>`;
@@ -1238,8 +1251,9 @@ function renderGoals() {
         .sort((a, b) => b.goal.deadline.localeCompare(a.goal.deadline));
 
     let html = '';
-    if (open.length > 1 && combined) {
-        html += `<section class="card goal-total-card">${combinedCard(combined, open)}</section>`;
+    const openSeparate = open.filter(r => !L.isDailyGoal(r.goal));
+    if (openSeparate.length > 1 && combined) {
+        html += `<section class="card goal-total-card">${combinedCard(combined, openSeparate)}</section>`;
     }
     if (open.length > 1) {
         const manual = L.isManualOrder(goals());
@@ -1262,13 +1276,16 @@ function goalCard(r, ctx) {
     const pct = Math.round(r.progress * 100);
     const s = settings();
     const open = isOpenGoal(r);
+    const daily = L.isDailyGoal(g);
 
     let details = '';
     if (open) {
         const lucroOk = r.kmPorDia > 0;
         details = `
             <div class="stat-grid">
-                ${lucroOk
+                ${daily
+                    ? `<div class="stat"><span class="stat-label">A mais por dia</span><span class="stat-value big">${lucroOk ? brl(r.brutoPorDia) : brl(r.porDia)}</span><span class="stat-sub">${lucroOk ? 'bruto' : 'líquido'} além da meta do dia · ${plural(r.diasRestantes, 'dia', 'dias')}</span></div>`
+                    : lucroOk
                     ? `<div class="stat"><span class="stat-label">Faturar por dia</span><span class="stat-value big">${brl(r.brutoPorDia)}</span><span class="stat-sub">bruto · ${plural(r.diasRestantes, 'dia de trabalho', 'dias de trabalho')}</span></div>`
                     : `<div class="stat"><span class="stat-label">Líquido por dia</span><span class="stat-value big">${brl(r.porDia)}</span><span class="stat-sub">${plural(r.diasRestantes, 'dia de trabalho', 'dias de trabalho')}</span></div>`}
                 <div class="stat"><span class="stat-label">Falta</span><span class="stat-value">${brl(r.falta)}</span><span class="stat-sub">${plural(r.calendarDaysLeft, 'dia', 'dias')} no calendário</span></div>
@@ -1276,6 +1293,7 @@ function goalCard(r, ctx) {
                 <div class="stat"><span class="stat-label">Líquido por dia</span><span class="stat-value">${brl(r.porDia)}</span><span class="stat-sub">o que sobra no bolso</span></div>
                 <div class="stat"><span class="stat-label">Rodar por dia</span><span class="stat-value">≈ ${fmt(r.kmPorDia, 0)} km</span><span class="stat-sub">a ${brl(L.num(s.mediaPagamentoKm))}/km</span></div>` : ''}
             </div>
+            ${daily ? `<p class="goal-status goal-daily">Somada à meta do dia: + ${brl(L.goalDailyShare(g))} por dia de trabalho. Conta para esta meta só o que passar da meta normal.</p>` : ''}
             ${r.status === 'scheduled' ? `<p class="goal-status">Começa a contar em ${fullDate(g.startDate)}.</p>` : goalTodayLine(r)}`;
     } else if (r.status === 'done') {
         details = '<p class="goal-status">Meta batida!</p>';
@@ -1385,6 +1403,7 @@ function openGoalDialog(id = null) {
     $('goal-deadline').value = g?.deadline || L.toDateKey(L.getMonthRange(today).end);
     state.goalWeekdays = g ? [...g.weekdays] : L.defaultWorkWeekdays(settings());
     renderWeekdayChips('goal-weekdays', state.goalWeekdays);
+    $('goal-add-daily').checked = L.isDailyGoal(g);
     updateGoalPreview();
     $('goal-dialog').showModal();
     if (!g) setTimeout(() => $('goal-amount').focus(), 50);
@@ -1396,7 +1415,8 @@ function readGoalForm() {
         name: $('goal-name').value.trim(),
         startDate: $('goal-start').value,
         deadline: $('goal-deadline').value,
-        weekdays: [...state.goalWeekdays]
+        weekdays: [...state.goalWeekdays],
+        addToDaily: $('goal-add-daily').checked
     };
 }
 
@@ -1424,11 +1444,17 @@ function updateGoalPreview() {
     if (!state.editingGoal && L.isManualOrder(others)) draft.priority = insertionPriority(others, draft);
     const { results, combined } = L.evaluateGoals([...others, draft], settings(), state.data.history, new Date());
     const r = results.find(x => x.goal.id === draft.id);
+    const share = L.goalDailyShare(draft);
+    $('goal-add-daily-sub').textContent = share > 0
+        ? `A meta do dia aumenta ${brl(share)} em cada dia de trabalho do período. Só o que passar da meta normal conta para esta meta.`
+        : 'A meta do dia aumenta durante o período desta meta. Só o que passar da meta normal conta para ela.';
     if (r.status === 'done') {
         el.innerHTML = `<div class="preview-row"><span>Você já fez ${brl(r.net)} nesse período</span><strong>Meta batida</strong></div>`;
         return;
     }
-    const rows = r.brutoPorDia > 0
+    const rows = f.addToDaily
+        ? [['Meta do dia a mais', `${brl(share)} por dia de trabalho`], ['Por dia, além da meta normal', r.brutoPorDia > 0 ? `≈ ${brl(r.brutoPorDia)} brutos` : `${brl(r.porDia)} líquidos`]]
+        : r.brutoPorDia > 0
         ? [['Você precisa faturar por dia', `≈ ${brl(r.brutoPorDia)} brutos`], ['Líquido por dia', brl(r.porDia)], ['Rodagem por dia', `≈ ${fmt(r.kmPorDia, 0)} km`]]
         : [['Você precisa fazer por dia', `${brl(r.porDia)} líquidos`]];
     const openCount = results.filter(isOpenGoal).length;
@@ -1436,7 +1462,7 @@ function updateGoalPreview() {
     if (r.net !== 0) rows.push(['Já conta para esta meta', brl(r.net)]);
     if (openCount > 1) {
         rows.push(['Prioridade', `${results.filter(isOpenGoal).indexOf(r) + 1}ª de ${openCount}`]);
-        if (combined) rows.push(['Para bater todas as metas', combined.brutoPorDia > 0 ? `≈ ${brl(combined.brutoPorDia)}/dia brutos` : `${brl(combined.porDia)}/dia`]);
+        if (combined && !f.addToDaily) rows.push(['Para bater todas as metas', combined.brutoPorDia > 0 ? `≈ ${brl(combined.brutoPorDia)}/dia brutos` : `${brl(combined.porDia)}/dia`]);
     }
     el.innerHTML = rows.map(([k, v]) => `<div class="preview-row"><span>${k}</span><strong>${v}</strong></div>`).join('');
 }
@@ -1455,8 +1481,10 @@ function saveGoal(e) {
     const existing = state.editingGoal && goals().find(g => g.id === state.editingGoal);
     if (existing) {
         Object.assign(existing, f);
+        if (!existing.addToDaily) delete existing.addToDaily;
     } else {
         const g = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), createdAt: Date.now(), ...f };
+        if (!g.addToDaily) delete g.addToDaily;
         // com prioridade manual, a nova meta entra onde a regra automática a colocaria
         if (L.isManualOrder(goals())) {
             const list = openGoalOrder();
@@ -1471,7 +1499,7 @@ function saveGoal(e) {
     toast(existing ? 'Meta atualizada.' : 'Meta criada! Acompanhe o progresso na tela Início.');
     const active = document.querySelector('.screen.active')?.id;
     if (active === 'goals-screen') renderGoals();
-    else if (active === 'dashboard-screen') renderGoalWidget();
+    else if (active === 'dashboard-screen') refreshDashboard();
 }
 
 async function deleteGoal(id) {
@@ -1956,7 +1984,7 @@ function bindEvents() {
     });
     $('goal-form').addEventListener('submit', saveGoal);
     $('goal-form').addEventListener('change', (e) => {
-        if (e.target.type === 'date') updateGoalPreview();
+        if (e.target.type === 'date' || e.target.id === 'goal-add-daily') updateGoalPreview();
     });
     $('goal-weekdays').addEventListener('click', (e) => {
         if (toggleWeekday(e, state.goalWeekdays)) updateGoalPreview();
