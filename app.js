@@ -1,9 +1,9 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.9.0';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.9.0';
-import * as L from './logic.js?v=2.9.0';
-import * as P from './plans.js?v=2.9.0';
-import * as F from './finance.js?v=2.9.0';
-import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.9.0';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.9.1';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.9.1';
+import * as L from './logic.js?v=2.9.1';
+import * as P from './plans.js?v=2.9.1';
+import * as F from './finance.js?v=2.9.1';
+import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.9.1';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -1293,7 +1293,7 @@ function goalCard(r, ctx) {
                 <div class="stat"><span class="stat-label">Líquido por dia</span><span class="stat-value">${brl(r.porDia)}</span><span class="stat-sub">o que sobra no bolso</span></div>
                 <div class="stat"><span class="stat-label">Rodar por dia</span><span class="stat-value">≈ ${fmt(r.kmPorDia, 0)} km</span><span class="stat-sub">a ${brl(L.num(s.mediaPagamentoKm))}/km</span></div>` : ''}
             </div>
-            ${daily ? `<p class="goal-status goal-daily">Somada à meta do dia: + ${brl(L.goalDailyShare(g))} por dia de trabalho. Conta para esta meta só o que passar da meta normal.</p>` : ''}
+            ${daily ? `<p class="goal-status goal-daily">Somada à meta do dia: + ${brl(r.status === 'active' ? r.porDia : L.goalDailyShare(g))} por dia de trabalho. O que passar da meta normal vai para esta meta e diminui os próximos dias.</p>` : ''}
             ${r.status === 'scheduled' ? `<p class="goal-status">Começa a contar em ${fullDate(g.startDate)}.</p>` : goalTodayLine(r)}`;
     } else if (r.status === 'done') {
         details = '<p class="goal-status">Meta batida!</p>';
@@ -1446,14 +1446,14 @@ function updateGoalPreview() {
     const r = results.find(x => x.goal.id === draft.id);
     const share = L.goalDailyShare(draft);
     $('goal-add-daily-sub').textContent = share > 0
-        ? `A meta do dia aumenta ${brl(share)} em cada dia de trabalho do período. Só o que passar da meta normal conta para esta meta.`
-        : 'A meta do dia aumenta durante o período desta meta. Só o que passar da meta normal conta para ela.';
+        ? `A meta do dia aumenta cerca de ${brl(share)} em cada dia de trabalho do período. O que passar da meta normal vai para esta meta e diminui os próximos dias.`
+        : 'A meta do dia aumenta durante o período desta meta. O que passar da meta normal vai para ela e diminui os próximos dias.';
     if (r.status === 'done') {
         el.innerHTML = `<div class="preview-row"><span>Você já fez ${brl(r.net)} nesse período</span><strong>Meta batida</strong></div>`;
         return;
     }
     const rows = f.addToDaily
-        ? [['Meta do dia a mais', `${brl(share)} por dia de trabalho`], ['Por dia, além da meta normal', r.brutoPorDia > 0 ? `≈ ${brl(r.brutoPorDia)} brutos` : `${brl(r.porDia)} líquidos`]]
+        ? [['Meta do dia a mais', `${brl(r.porDia)} por dia de trabalho`], ['Por dia, além da meta normal', r.brutoPorDia > 0 ? `≈ ${brl(r.brutoPorDia)} brutos` : `${brl(r.porDia)} líquidos`]]
         : r.brutoPorDia > 0
         ? [['Você precisa faturar por dia', `≈ ${brl(r.brutoPorDia)} brutos`], ['Líquido por dia', brl(r.porDia)], ['Rodagem por dia', `≈ ${fmt(r.kmPorDia, 0)} km`]]
         : [['Você precisa fazer por dia', `${brl(r.porDia)} líquidos`]];

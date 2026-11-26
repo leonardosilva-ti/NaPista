@@ -168,13 +168,25 @@ export function calculateTargets(scope, s, history, anchor, today = new Date(), 
 
     const weekdays = workWeekdays(s);
     // metas com prazo somadas à meta do dia aumentam a meta dos dias do período delas
-    const extras = goalDailyExtras(goals, s, history, startKey, endKey, today);
+    const extras = scope === 'day' ? goalDailyExtras(goals, s, history, startKey, endKey, today) : new Map();
     let metaExtra = 0;
     const metaExtraGoals = new Map();
-    extras.forEach(list => list.forEach(({ goal, value }) => {
-        metaExtra += value;
-        metaExtraGoals.set(goal, (metaExtraGoals.get(goal) || 0) + value);
-    }));
+    if (scope === 'day') {
+        extras.forEach(list => list.forEach(({ goal, value }) => {
+            metaExtra += value;
+            metaExtraGoals.set(goal, (metaExtraGoals.get(goal) || 0) + value);
+        }));
+    } else {
+        // semana/mês: a parte da meta que cai no período (valor × dias dela no período ÷ dias dela)
+        (goals || []).filter(g => isDailyGoal(g) && g.startDate <= endKey && g.deadline >= startKey).forEach(g => {
+            const lo = g.startDate > startKey ? g.startDate : startKey;
+            const hi = g.deadline < endKey ? g.deadline : endKey;
+            const value = goalDailyShare(g) * countWorkDays(parseDateKey(lo), parseDateKey(hi), goalWeekdaysOf(g));
+            if (value < 0.005) return;
+            metaExtra += value;
+            metaExtraGoals.set(g, value);
+        });
+    }
     const metaDia = dailyTarget(s, anchor) + (scope === 'day' ? metaExtra : 0);
     let metaCheia = scope === 'day' ? metaDia
         : scope === 'week' ? num(s.metaLiquidaMensal) / WEEKS_PER_MONTH
@@ -327,8 +339,9 @@ function baseDayTarget(s, key) {
 
 /**
  * Acréscimo de cada dia entre `fromKey` e `toKey` pelas metas somadas à meta do
- * dia: Map(data → [{ goal, value }]). Cada dia de trabalho da meta recebe a parte
- * dela, limitada ao que ainda faltava no começo do dia (meta batida para de somar).
+ * dia: Map(data → [{ goal, value }]). Cada dia de trabalho da meta recebe o que
+ * faltava no começo do dia dividido pelos dias de trabalho que restam (incluindo
+ * ele): o que passa da meta do dia vai para a meta e diminui os próximos dias.
  */
 export function goalDailyExtras(goals, s, history, fromKey, toKey, today = new Date()) {
     const out = new Map();
@@ -336,19 +349,28 @@ export function goalDailyExtras(goals, s, history, fromKey, toKey, today = new D
     if (!daily.length) return out;
     const alloc = allocateGoals(orderGoals(goals, today), history, s);
     for (const g of daily) {
-        const share = goalDailyShare(g);
-        if (!(share > 0)) continue;
         const wd = goalWeekdaysOf(g);
         const trace = alloc.trace.get(g.id) || [];
         const meta = num(g.amount);
-        const lo = g.startDate > fromKey ? g.startDate : fromKey;
+        const tk = toDateKey(startOfDay(today));
+        // dias futuros usam o valor de hoje: começa de hoje mesmo que o pedido seja depois
+        const from = fromKey > tk ? tk : fromKey;
+        const lo = g.startDate > from ? g.startDate : from;
         const hi = g.deadline < toKey ? g.deadline : toKey;
-        let t = 0, got = 0;
+        const end = parseDateKey(g.deadline);
+        let t = 0, got = 0, planned = null, todayValue = null;
         for (let d = parseDateKey(lo), k = lo; k <= hi; d = addDays(d, 1), k = toDateKey(d)) {
             while (t < trace.length && trace[t][0] < k) got = trace[t++][1];
             if (!wd.includes(d.getDay())) continue;
-            const value = Math.min(share, Math.max(0, meta - got));
-            if (value < 0.005) continue;
+            let value = planned ?? Math.max(0, meta - got) / Math.max(1, countWorkDays(d, end, wd));
+            if (k === tk) todayValue = value;
+            if (k > tk && planned === null) {
+                // dias futuros: valor igual em todos. O que passou da meta hoje já
+                // diminui; o que ainda não foi lançado hoje não aumenta.
+                if (todayValue !== null) value = Math.min(value, todayValue);
+                planned = value;
+            }
+            if (k < fromKey || value < 0.005) continue;
             if (!out.has(k)) out.set(k, []);
             out.get(k).push({ goal: g, value });
         }
