@@ -1,9 +1,9 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.10.2';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.10.2';
-import * as L from './logic.js?v=2.10.2';
-import * as P from './plans.js?v=2.10.2';
-import * as F from './finance.js?v=2.10.2';
-import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.10.2';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.10.3';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.10.3';
+import * as L from './logic.js?v=2.10.3';
+import * as P from './plans.js?v=2.10.3';
+import * as F from './finance.js?v=2.10.3';
+import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.10.3';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -815,6 +815,7 @@ function renderHero(r) {
         $('hero-badge').textContent = '—';
         $('hero-progress').style.width = '0%';
         $('hero-gross').textContent = brl(r.summary.gross);
+        $('hero-target').textContent = '—';
         fix.hidden = false;
         return;
     }
@@ -824,6 +825,7 @@ function renderHero(r) {
     $('hero-progress').style.width = `${pct}%`;
     $('hero-progressbar').setAttribute('aria-valuenow', pct);
     $('hero-gross').textContent = brl(r.summary.gross);
+    $('hero-target').textContent = brl(r.meta); // sempre a meta do período, mesmo depois de batida
 
     if (r.antesDoInicio) {
         hero.dataset.state = 'done';
