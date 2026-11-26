@@ -877,3 +877,6 @@ body.mode-gestao .brand { gap: 8px; }
 #fin-filter-cats .cat-chips { margin-bottom: 10px; }
 .goal-daily-field { padding: 12px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border); }
 .goal-daily { color: var(--info); }
+.meta-var { margin-top: 4px; padding: 12px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border); gap: 0; }
+.meta-var-opts { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.meta-var-opts .switch-text strong { font-size: 0.9rem; }

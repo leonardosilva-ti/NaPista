@@ -1,9 +1,9 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.9.1';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.9.1';
-import * as L from './logic.js?v=2.9.1';
-import * as P from './plans.js?v=2.9.1';
-import * as F from './finance.js?v=2.9.1';
-import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.9.1';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.10.0';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.10.0';
+import * as L from './logic.js?v=2.10.0';
+import * as P from './plans.js?v=2.10.0';
+import * as F from './finance.js?v=2.10.0';
+import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.10.0';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -559,6 +559,10 @@ function openSetup() {
     $('setup-pagamento-km').value = moneyInput(L.num(s.mediaPagamentoKm));
     $('setup-consumo').value = decimalInput(L.num(s.mediaConsumoL));
     $('setup-preco-comb').value = moneyInput(L.num(s.mediaPrecoCombustivel));
+    $('setup-meta-var').checked = s.metaVariavel === true;
+    $('setup-meta-var-up').checked = s.metaVarSobe !== false;
+    $('setup-meta-var-down').checked = s.metaVarDesce !== false;
+    $('setup-meta-var-opts').hidden = !$('setup-meta-var').checked;
 
     state.setupPlatforms = [...s.plataformas];
     state.setupOptions = [...new Set([...PRESET_PLATFORMS, ...s.plataformas])];
@@ -574,7 +578,10 @@ function readSetupForm() {
         metaLiquidaMensal: parseDecimal($('setup-meta').value),
         mediaPagamentoKm: parseDecimal($('setup-pagamento-km').value),
         mediaConsumoL: parseDecimal($('setup-consumo').value),
-        mediaPrecoCombustivel: parseDecimal($('setup-preco-comb').value)
+        mediaPrecoCombustivel: parseDecimal($('setup-preco-comb').value),
+        metaVariavel: $('setup-meta-var').checked,
+        metaVarSobe: $('setup-meta-var-up').checked,
+        metaVarDesce: $('setup-meta-var-down').checked
     };
 }
 
@@ -637,6 +644,7 @@ function saveSetup(e) {
     if (!(f.mediaPrecoCombustivel > 0)) return fail('Informe o preço do litro.', 'setup-preco-comb');
     if (f.mediaPagamentoKm <= f.mediaPrecoCombustivel / f.mediaConsumoL) return fail('O custo do combustível por km está maior que o ganho por km.', 'setup-pagamento-km');
     if (!state.setupPlatforms.length) return fail('Selecione pelo menos um aplicativo.');
+    if (f.metaVariavel && !f.metaVarSobe && !f.metaVarDesce) return fail('Meta variável: escolha aumentar, diminuir ou as duas.');
 
     const wasConfigured = L.isConfigured(settings());
     // mantém a ordem das opções exibidas
@@ -860,6 +868,14 @@ function renderHero(r) {
                 ? `Último dia de trabalho do período: ${brl(r.brutoFaltante)} brutos.`
                 : `Sugestão: ${brl(r.brutoPorDia)} por dia (≈ ${fmt(r.kmPorDia, 0)} km) nos próximos ${r.diasRestantes} dias de trabalho.`;
         }
+    }
+
+    if (Math.abs(r.metaVar || 0) > 0.004) {
+        const note = r.metaVar > 0
+            ? `Meta variável: + ${brl(r.metaVar)} pelo que faltou nos dias anteriores do mês.`
+            : `Meta variável: − ${brl(-r.metaVar)} pelo que passou da meta nos dias anteriores do mês.`;
+        tip.textContent = tip.hidden ? note : `${tip.textContent} ${note}`;
+        tip.hidden = false;
     }
 
     if (r.metaExtra > 0.004) {
@@ -1535,6 +1551,7 @@ function renderProfile() {
         ['Meta líquida mensal', brl(L.num(s.metaLiquidaMensal))],
         ['Dias de trabalho', weekdaysLabel(L.workWeekdays(s))],
         ['Meta líquida por dia', brl(L.dailyTarget(s, new Date()))],
+        ['Meta variável', !L.isVariableTarget(s) ? 'Desligada' : s.metaVarSobe === false ? 'Só diminui' : s.metaVarDesce === false ? 'Só aumenta' : 'Aumenta e diminui'],
         ['Ganho médio por km', brl(L.num(s.mediaPagamentoKm))],
         ['Consumo médio', `${fmt(L.num(s.mediaConsumoL))} km/L`],
         ['Preço do litro', brl(L.num(s.mediaPrecoCombustivel))],
@@ -1927,6 +1944,14 @@ function bindEvents() {
 
     $('setup-weekdays').addEventListener('click', (e) => {
         if (toggleWeekday(e, state.setupWeekdays)) updateSetupPreview();
+    });
+    $('setup-meta-var').addEventListener('change', (e) => {
+        $('setup-meta-var-opts').hidden = !e.target.checked;
+        // ligou sem nenhuma opção marcada: liga as duas
+        if (e.target.checked && !$('setup-meta-var-up').checked && !$('setup-meta-var-down').checked) {
+            $('setup-meta-var-up').checked = true;
+            $('setup-meta-var-down').checked = true;
+        }
     });
 
     // Navegação inferior (Na Pista e Gestão)

@@ -10,7 +10,10 @@ export const defaultSettings = () => ({
     mediaPagamentoKm: 0,
     mediaConsumoL: 0,
     mediaPrecoCombustivel: 0,
-    plataformas: []
+    plataformas: [],
+    metaVariavel: false,     // meta do dia muda conforme os dias anteriores do mês
+    metaVarSobe: true,       // ...aumenta quando faltou
+    metaVarDesce: true       // ...diminui quando passou
 });
 
 export const createDefaultData = () => ({ settings: defaultSettings(), history: [], goals: [] });
@@ -187,7 +190,10 @@ export function calculateTargets(scope, s, history, anchor, today = new Date(), 
             metaExtraGoals.set(g, value);
         });
     }
-    const metaDia = dailyTarget(s, anchor) + (scope === 'day' ? metaExtra : 0);
+    const metaBase = dailyTarget(s, anchor);
+    // meta variável: só a meta do dia muda (semana e mês continuam com a meta cheia)
+    const metaVar = scope === 'day' ? dayTarget(s, history, startKey, today) - metaBase : 0;
+    const metaDia = metaBase + metaVar + (scope === 'day' ? metaExtra : 0);
     let metaCheia = scope === 'day' ? metaDia
         : scope === 'week' ? num(s.metaLiquidaMensal) / WEEKS_PER_MONTH
         : num(s.metaLiquidaMensal);
@@ -238,6 +244,7 @@ export function calculateTargets(scope, s, history, anchor, today = new Date(), 
     const base = {
         scope, status, meta, metaCheia, metaDia, summary, progress, diasRestantes, inicioParcial,
         metaExtra: antesDoInicio ? 0 : metaExtra,
+        metaVar: antesDoInicio ? 0 : metaVar,
         metaExtraGoals: antesDoInicio ? [] : [...metaExtraGoals].map(([goal, value]) => ({ goal, value }))
     };
 
@@ -290,6 +297,54 @@ export function workDaysInMonth(s, d = new Date()) {
     return countWorkDays(start, end, workWeekdays(s));
 }
 
+/** Meta variável ligada (e com pelo menos uma das opções). */
+export const isVariableTarget = (s) => s?.metaVariavel === true && (s.metaVarSobe !== false || s.metaVarDesce !== false);
+
+/**
+ * Meta do dia `key` (sem as metas com prazo). Com a meta variável, o que faltou
+ * ou passou nos dias anteriores do mês é dividido entre os dias de trabalho que
+ * restam (incluindo o dia): sobe quando faltou e/ou desce quando passou,
+ * conforme as opções. Dias futuros usam o valor de hoje; o que passar hoje já
+ * diminui os próximos dias, o que ainda não foi lançado hoje não aumenta.
+ */
+export function dayTarget(s, history, key, today = new Date()) {
+    const d = parseDateKey(key);
+    const base = dailyTarget(s, d);
+    if (!isVariableTarget(s) || !(base > 0)) return base;
+    const tk = toDateKey(startOfDay(today));
+    const { start, end } = getMonthRange(d);
+    const ms = toDateKey(start);
+    const me = toDateKey(end);
+    if (ms > tk) return base; // mês que ainda não começou
+    const inicio = typeof s.dataInicio === 'string' && s.dataInicio > ms ? s.dataInicio : ms;
+    if (key < inicio) return base;
+
+    const weekdays = workWeekdays(s);
+    const nets = new Map();
+    history.forEach(h => { if (h.date >= inicio && h.date <= me) nets.set(h.date, dayNet(h, s)); });
+    // diferença acumulada (lucro − meta) dos dias de `inicio` até antes de `k`
+    const cumBefore = (k) => {
+        let c = 0;
+        for (let x = parseDateKey(inicio), xk = inicio; xk < k; x = addDays(x, 1), xk = toDateKey(x)) {
+            c += nets.get(xk) || 0;
+            if (weekdays.includes(x.getDay())) c -= base;
+        }
+        return c;
+    };
+    const raw = (k) => base - cumBefore(k) / Math.max(1, countWorkDays(parseDateKey(k), end, weekdays));
+
+    let v;
+    if (key <= tk) {
+        v = raw(key);
+    } else {
+        const next = toDateKey(addDays(parseDateKey(tk), 1));
+        v = Math.min(raw(tk), next <= me ? raw(next) : raw(tk));
+    }
+    if (s.metaVarSobe === false) v = Math.min(base, v);
+    if (s.metaVarDesce === false) v = Math.max(base, v);
+    return Math.max(0, v);
+}
+
 /** Meta líquida diária: meta mensal dividida pelos dias de trabalho do mês. */
 export function dailyTarget(s, d = new Date()) {
     const dias = workDaysInMonth(s, d);
@@ -332,9 +387,9 @@ export function goalDailyShare(g) {
 }
 
 /** Meta normal de um dia (a do perfil); é o que fica fora das metas somadas à meta do dia. */
-function baseDayTarget(s, key) {
+function baseDayTarget(s, key, history) {
     const d = parseDateKey(key);
-    return workWeekdays(s).includes(d.getDay()) ? dailyTarget(s, d) : 0;
+    return workWeekdays(s).includes(d.getDay()) ? dayTarget(s, history, key) : 0;
 }
 
 /**
@@ -442,7 +497,7 @@ export function allocateGoals(order, history, s, skipKey = null) {
             if (k > g.deadline || got >= meta) break;
             const total = avail.get(k);
             // somada à meta do dia: só o que passa da meta normal do dia conta para ela
-            const reserve = daily && total > 0 ? Math.min(total, baseDayTarget(s, k)) : 0;
+            const reserve = daily && total > 0 ? Math.min(total, baseDayTarget(s, k, history)) : 0;
             const a = total - reserve;
             if (daily && !(a > 0)) continue;
             if (!a && !availGross.get(k)) continue;
