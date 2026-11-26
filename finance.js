@@ -1,6 +1,6 @@
 // Gestão na Pista: regras de finanças pessoais (contas, lançamentos e cartões).
 // Sem dependência de DOM. Datas sempre como "AAAA-MM-DD" no fuso do aparelho.
-import { num, toDateKey, parseDateKey, dayNet, dayGross, dayExpenses, dayTarget, workWeekdays, goalDailyExtras } from './logic.js?v=2.10.3';
+import { num, toDateKey, parseDateKey, dayNet, dayGross, dayExpenses, dayTarget, workWeekdays, goalDailyExtras } from './logic.js?v=2.11.0';
 
 export const WALLET_ID = 'carteira';
 export const APPS_CATEGORY_ID = 'r_apps';

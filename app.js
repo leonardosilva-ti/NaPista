@@ -1,9 +1,9 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.10.3';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.10.3';
-import * as L from './logic.js?v=2.10.3';
-import * as P from './plans.js?v=2.10.3';
-import * as F from './finance.js?v=2.10.3';
-import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.10.3';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.11.0';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.11.0';
+import * as L from './logic.js?v=2.11.0';
+import * as P from './plans.js?v=2.11.0';
+import * as F from './finance.js?v=2.11.0';
+import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.11.0';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -835,6 +835,25 @@ function renderHero(r) {
         return;
     }
 
+    if (r.folga) {
+        // dia fora dos dias de trabalho: sem meta; o que entrar é excedente
+        const net = r.summary.net;
+        hero.dataset.state = net > 0 ? 'done' : 'progress';
+        $('hero-label').textContent = 'Dia de folga';
+        $('hero-badge').textContent = 'Folga';
+        $('hero-progress').style.width = net > 0 ? '100%' : '0%';
+        $('hero-progressbar').setAttribute('aria-valuenow', net > 0 ? 100 : 0);
+        $('hero-target').textContent = 'Folga';
+        if (net > 0) {
+            $('hero-value').textContent = `+ ${brl(net)}`;
+            $('hero-sub').textContent = 'líquido excedente: diminui a meta dos próximos dias';
+        } else {
+            $('hero-value').textContent = 'Folga';
+            $('hero-sub').textContent = 'Se trabalhar, lance abaixo: entra como excedente e diminui a meta dos próximos dias.';
+        }
+        return;
+    }
+
     if (r.metaAlcancada) {
         hero.dataset.state = 'done';
         $('hero-label').textContent = `Meta ${word} batida`;
@@ -871,7 +890,9 @@ function renderHero(r) {
     if (Math.abs(r.metaVar || 0) > 0.004) {
         const note = r.metaVar > 0
             ? `Meta variável: + ${brl(r.metaVar)} pelo que faltou nos dias anteriores do mês.`
-            : `Meta variável: − ${brl(-r.metaVar)} pelo que passou da meta nos dias anteriores do mês.`;
+            : L.isVariableTarget(settings())
+                ? `Meta variável: − ${brl(-r.metaVar)} pelo que passou da meta nos dias anteriores do mês.`
+                : `− ${brl(-r.metaVar)} pelo que você fez nas folgas deste mês.`;
         tip.textContent = tip.hidden ? note : `${tip.textContent} ${note}`;
         tip.hidden = false;
     }

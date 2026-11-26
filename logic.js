@@ -190,9 +190,11 @@ export function calculateTargets(scope, s, history, anchor, today = new Date(), 
             metaExtraGoals.set(g, value);
         });
     }
-    const metaBase = dailyTarget(s, anchor);
-    // meta variável: só a meta do dia muda (semana e mês continuam com a meta cheia)
-    const metaVar = scope === 'day' ? dayTarget(s, history, startKey, today) - metaBase : 0;
+    // dia de folga (fora dos dias de trabalho do perfil): sem meta; o que entrar é excedente
+    const folga = scope === 'day' && !weekdays.includes(start.getDay());
+    const metaBase = folga ? 0 : dailyTarget(s, anchor);
+    // meta variável (e o que entrou nas folgas): só a meta do dia muda (semana e mês continuam com a meta cheia)
+    const metaVar = scope === 'day' && !folga ? dayTarget(s, history, startKey, today) - metaBase : 0;
     const metaDia = metaBase + metaVar + (scope === 'day' ? metaExtra : 0);
     let metaCheia = scope === 'day' ? metaDia
         : scope === 'week' ? num(s.metaLiquidaMensal) / WEEKS_PER_MONTH
@@ -245,6 +247,7 @@ export function calculateTargets(scope, s, history, anchor, today = new Date(), 
         scope, status, meta, metaCheia, metaDia, summary, progress, diasRestantes, inicioParcial,
         metaExtra: antesDoInicio ? 0 : metaExtra,
         metaVar: antesDoInicio ? 0 : metaVar,
+        folga: folga && !(metaDia > 0.004),
         metaExtraGoals: antesDoInicio ? [] : [...metaExtraGoals].map(([goal, value]) => ({ goal, value }))
     };
 
@@ -310,7 +313,8 @@ export const isVariableTarget = (s) => s?.metaVariavel === true && (s.metaVarSob
 export function dayTarget(s, history, key, today = new Date()) {
     const d = parseDateKey(key);
     const base = dailyTarget(s, d);
-    if (!isVariableTarget(s) || !(base > 0)) return base;
+    if (!(base > 0)) return base;
+    const variable = isVariableTarget(s);
     const tk = toDateKey(startOfDay(today));
     const { start, end } = getMonthRange(d);
     const ms = toDateKey(start);
@@ -320,14 +324,20 @@ export function dayTarget(s, history, key, today = new Date()) {
     if (key < inicio) return base;
 
     const weekdays = workWeekdays(s);
+    const isWork = (key2) => weekdays.includes(parseDateKey(key2).getDay());
     const nets = new Map();
-    history.forEach(h => { if (h.date >= inicio && h.date <= me) nets.set(h.date, dayNet(h, s)); });
-    // diferença acumulada (lucro − meta) dos dias de `inicio` até antes de `k`
+    history.forEach(h => {
+        // sem a meta variável, só o que entrou nas folgas conta (como excedente)
+        if (h.date >= inicio && h.date <= me && (variable || !isWork(h.date))) nets.set(h.date, dayNet(h, s));
+    });
+    if (!variable && ![...nets.values()].some(v => v > 0)) return base;
+    // diferença acumulada (lucro − meta) dos dias de `inicio` até antes de `k`;
+    // folga não tem meta: o que entrar nela é excedente
     const cumBefore = (k) => {
         let c = 0;
         for (let x = parseDateKey(inicio), xk = inicio; xk < k; x = addDays(x, 1), xk = toDateKey(x)) {
             c += nets.get(xk) || 0;
-            if (weekdays.includes(x.getDay())) c -= base;
+            if (variable && weekdays.includes(x.getDay())) c -= base;
         }
         return c;
     };
@@ -340,8 +350,8 @@ export function dayTarget(s, history, key, today = new Date()) {
         const next = toDateKey(addDays(parseDateKey(tk), 1));
         v = Math.min(raw(tk), next <= me ? raw(next) : raw(tk));
     }
-    if (s.metaVarSobe === false) v = Math.min(base, v);
-    if (s.metaVarDesce === false) v = Math.max(base, v);
+    if (!variable || s.metaVarSobe === false) v = Math.min(base, v);
+    if (variable && s.metaVarDesce === false) v = Math.max(base, v);
     return Math.max(0, v);
 }
 
