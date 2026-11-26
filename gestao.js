@@ -1,6 +1,6 @@
 // Gestão na Pista: telas do controle financeiro (resumo, lançamentos, cartões e contas).
-import * as L from './logic.js?v=2.7.1';
-import * as F from './finance.js?v=2.7.1';
+import * as L from './logic.js?v=2.8.0';
+import * as F from './finance.js?v=2.8.0';
 
 export const GESTAO_SCREENS = ['fin-home-screen', 'fin-entries-screen', 'fin-cards-screen', 'fin-accounts-screen'];
 
@@ -15,6 +15,9 @@ const ICON_NEXT = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path
 const ICON_CARD = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg>';
 const ICON_PLUS = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
 const ICON_SWAP = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/></svg>';
+const ICON_FILTER = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8.5V19l-4 2v-7.5L3 5Z"/></svg>';
+const ICON_NOTE = '<svg class="ico note-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>';
+const ICON_X = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 const ICON_TRASH = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>';
 
 export function createGestao(ctx) {
@@ -28,6 +31,8 @@ export function createGestao(ctx) {
     const ui = {
         month: F.ymOf(todayKey()),
         filter: 'all',
+        catFilter: [],        // filtro por categorias (ids)
+        tagFilter: [],        // filtro por tags
         cardId: null,
         invoiceYm: null,
         catType: 'expense',
@@ -87,13 +92,14 @@ export function createGestao(ctx) {
         const sub = [
             showDate ? weekdayDate(o.date) : null,
             o.forecast ? 'Meta líquida do dia' : o.virtual ? esc(o.apps?.length ? o.apps.join(', ') : 'Na Pista') : esc(cat.name),
-            `<span class="where">${whereLabel(o)}</span>`
+            `<span class="where">${whereLabel(o)}</span>`,
+            o.tags?.length ? `<span class="fin-tags">${o.tags.map(t => `<span class="fin-tag">#${esc(t)}</span>`).join('')}</span>` : null
         ].filter(Boolean).join(' · ');
         return `
         <li><button type="button" class="list-item fin-row${future ? ' is-future' : ''}${o.forecast ? ' is-forecast' : ''}" data-occ="${esc(o.id)}">
             ${catBadge(cat)}
             <span class="item-main">
-                <span class="item-title">${esc(o.desc || cat.name)} ${recTag(o)}${future && !o.forecast ? ' <span class="tag tag-info">Previsto</span>' : ''}</span>
+                <span class="item-title">${esc(o.desc || cat.name)}${o.note ? ` <span role="img" aria-label="Com observação" title="Tem observação">${ICON_NOTE}</span>` : ''} ${recTag(o)}${future && !o.forecast ? ' <span class="tag tag-info">Previsto</span>' : ''}</span>
                 <span class="item-sub">${sub}</span>
             </span>
             <span class="item-value ${o.type === 'income' ? 'pos' : 'neg'}">${signedBrl(o)}</span>
@@ -292,14 +298,16 @@ export function createGestao(ctx) {
     // ── Lançamentos ──
     function renderEntries() {
         const { start, end } = F.monthRange(ui.month);
-        const all = F.occurrences(data(), start, end);
+        const filtering = ui.catFilter.length > 0 || ui.tagFilter.length > 0;
+        const all = F.occurrences(data(), start, end).filter(matchesFilter);
         const income = all.filter(o => o.type === 'income').reduce((a, o) => a + o.amount, 0);
         const fcTotal = all.filter(o => o.forecast).reduce((a, o) => a + o.amount, 0);
         const expense = all.filter(o => o.type === 'expense').reduce((a, o) => a + o.amount, 0);
         const list = all.filter(o => ui.filter === 'all' ? true
             : ui.filter === 'card' ? !!o.cardId
             : o.type === ui.filter);
-        if (ui.filter === 'all') list.push(...F.movements(data(), start, end));
+        // transferências e faturas não têm categoria nem tag: somem quando há filtro
+        if (ui.filter === 'all' && !filtering) list.push(...F.movements(data(), start, end));
         list.sort((a, b) => b.date.localeCompare(a.date));
 
         const groups = new Map();
@@ -318,6 +326,7 @@ export function createGestao(ctx) {
             <div class="seg" role="tablist" aria-label="Filtrar lançamentos">
                 ${filters.map(([k, label]) => `<button type="button" role="tab" class="seg-btn${ui.filter === k ? ' active' : ''}" data-fin-filter="${k}" aria-selected="${ui.filter === k}">${label}</button>`).join('')}
             </div>
+            ${filterBar()}
             <div class="fin-totals">
                 <span>Receitas<strong class="pos">${brl(income)}</strong></span>
                 <span>Despesas<strong class="neg">${brl(expense)}</strong></span>
@@ -325,9 +334,53 @@ export function createGestao(ctx) {
             </div>
             ${fcTotal > 0 ? `<p class="fin-forecast-note">Inclui ${brl(fcTotal)} de previsão pela meta diária. Desligue em Resumo para ver só os lançados.</p>` : ''}
             <section class="card card-list">
-                <ul class="list list-select fin-list">${rows || '<li class="empty">Nenhum lançamento neste mês. Toque em + para lançar.</li>'}</ul>
+                <ul class="list list-select fin-list">${rows || (filtering ? '<li class="empty">Nenhum lançamento com esses filtros neste mês.</li>' : '<li class="empty">Nenhum lançamento neste mês. Toque em + para lançar.</li>')}</ul>
             </section>`;
     }
+
+    // ── Filtros por categoria e tag ──
+    function matchesFilter(o) {
+        if (ui.catFilter.length && !ui.catFilter.includes(o.categoryId)) return false;
+        if (ui.tagFilter.length && !ui.tagFilter.some(t => F.hasTag(o.tags, t))) return false;
+        return true;
+    }
+
+    function filterBar() {
+        const n = ui.catFilter.length + ui.tagFilter.length;
+        const chips = [
+            ...ui.catFilter.map(id => {
+                const c = categoryOf(id);
+                return `<button type="button" class="chip chip-active" data-unfilter-cat="${esc(id)}" aria-label="Tirar filtro ${esc(c.name)}"><span class="plat-dot" style="--c:${esc(c.color)}"></span>${esc(c.name)}${ICON_X}</button>`;
+            }),
+            ...ui.tagFilter.map(t => `<button type="button" class="chip chip-active" data-unfilter-tag="${esc(t)}" aria-label="Tirar filtro ${esc(t)}">#${esc(t)}${ICON_X}</button>`)
+        ].join('');
+        return `
+            <div class="filter-bar">
+                <button type="button" class="chip${n ? ' chip-active' : ''}" data-open-filter>${ICON_FILTER}Filtrar${n ? ` <span class="filter-count">${n}</span>` : ''}</button>
+                ${chips}
+                ${n > 1 ? '<button type="button" class="filter-clear" data-clear-filter>Limpar</button>' : ''}
+            </div>`;
+    }
+
+    function openFilter() {
+        renderFilter();
+        $('fin-filter-dialog').showModal();
+    }
+
+    function renderFilter() {
+        const cats = [...categoriesOf('expense'), ...fin().categories.filter(c => c.type === 'income')];
+        $('fin-filter-cats').innerHTML = cats.map(c => `
+            <button type="button" class="chip cat-chip" data-filter-cat="${esc(c.id)}" aria-pressed="${ui.catFilter.includes(c.id)}"><span class="plat-dot" style="--c:${esc(c.color)}"></span>${esc(c.name)}</button>`).join('');
+        // tags marcadas que não existem mais continuam aparecendo para poder desmarcar
+        const tags = F.allTags(data());
+        ui.tagFilter.forEach(t => { if (!F.hasTag(tags, t)) tags.push(t); });
+        $('fin-filter-tags').innerHTML = tags.length
+            ? tags.map(t => `<button type="button" class="chip" data-filter-tag="${esc(t)}" aria-pressed="${F.hasTag(ui.tagFilter, t)}">#${esc(t)}</button>`).join('')
+            : '<p class="hint" style="margin:0">Nenhuma tag ainda. Adicione tags ao lançar (ex: viagem, trabalho).</p>';
+    }
+
+    const toggleIn = (list, v, eq = (a, b) => a === b) => (list.some(x => eq(x, v)) ? list.filter(x => !eq(x, v)) : [...list, v]);
+    const sameTag = (a, b) => F.hasTag([a], b);
 
     // ── Cartões ──
     const STATUS_LABEL = { open: 'Aberta', closed: 'Fechada', overdue: 'Vencida', paid: 'Paga', empty: 'Sem gastos', settled: 'Anterior ao cadastro' };
@@ -541,6 +594,9 @@ export function createGestao(ctx) {
         $('fin-entry-title').textContent = !e ? 'Novo lançamento' : isInst ? 'Editar compra parcelada' : e.rec.kind === 'once' ? 'Editar lançamento' : 'Editar lançamento recorrente';
         $('fin-entry-amount').value = e ? moneyInput(isInst ? e.amount : occ.amount) : '';
         $('fin-entry-desc').value = e ? (occ.desc || '') : '';
+        $('fin-entry-tags').value = e ? (occ.tags || []).join(', ') : '';
+        $('fin-entry-note').value = e ? (occ.note || '') : '';
+        renderTagSuggest();
         $('fin-entry-date').value = e ? (isInst ? e.date : occ.date) : todayKey();
         $('fin-entry-count').value = e?.rec.count ? String(e.rec.count) : '';
         $('fin-entry-installments').value = isInst ? String(e.rec.count) : '';
@@ -555,6 +611,15 @@ export function createGestao(ctx) {
         renderEntryType();
         $('fin-entry-dialog').showModal();
         if (!e) setTimeout(() => $('fin-entry-amount').focus(), 50);
+    }
+
+    /** Tags já usadas que ainda não estão no campo: um toque adiciona. */
+    function renderTagSuggest() {
+        const typed = F.parseTags($('fin-entry-tags').value);
+        const list = F.allTags(data()).filter(t => !F.hasTag(typed, t)).slice(0, 12);
+        const el = $('fin-entry-tag-suggest');
+        el.hidden = !list.length || typed.length >= F.MAX_TAGS;
+        el.innerHTML = list.map(t => `<button type="button" class="chip" data-add-tag="${esc(t)}">${esc(t)}</button>`).join('');
     }
 
     function fillSelect(id, items, selected) {
@@ -609,6 +674,8 @@ export function createGestao(ctx) {
             type: card ? 'expense' : ui.entryType,
             amount: parseDecimal($('fin-entry-amount').value),
             desc: $('fin-entry-desc').value.trim(),
+            note: $('fin-entry-note').value.trim(),
+            tags: F.parseTags($('fin-entry-tags').value),
             date: $('fin-entry-date').value,
             categoryId: ui.entryCat,
             accountId: card ? null : $('fin-entry-account').value,
@@ -656,6 +723,8 @@ export function createGestao(ctx) {
 
     function buildEntry(f) {
         const e = { id: uid(), createdAt: Date.now(), type: f.type, desc: f.desc, amount: f.amount, date: f.date, categoryId: f.categoryId, rec: { ...f.rec } };
+        if (f.note) e.note = f.note;
+        if (f.tags.length) e.tags = [...f.tags];
         if (f.cardId) e.cardId = f.cardId; else e.accountId = f.accountId;
         return e;
     }
@@ -666,6 +735,8 @@ export function createGestao(ctx) {
         e.amount = f.amount;
         e.categoryId = f.categoryId;
         e.rec = { ...f.rec };
+        if (f.note) e.note = f.note; else delete e.note;
+        if (f.tags.length) e.tags = [...f.tags]; else delete e.tags;
         delete e.cardId;
         delete e.accountId;
         if (f.cardId) e.cardId = f.cardId; else e.accountId = f.accountId;
@@ -718,7 +789,7 @@ export function createGestao(ctx) {
                 if (!scope) return;
                 if (scope === 'one') {
                     e.overrides = e.overrides || {};
-                    const ov = { ...(e.overrides[idx] || {}), amount: f.amount, desc: f.desc, categoryId: f.categoryId };
+                    const ov = { ...(e.overrides[idx] || {}), amount: f.amount, desc: f.desc, categoryId: f.categoryId, note: f.note, tags: [...f.tags] };
                     if (!e.cardId && f.accountId) ov.accountId = f.accountId;
                     e.overrides[idx] = ov;
                     if (f.date !== occDate || f.rec.kind !== e.rec.kind) message = 'Salvo só neste. A data e a repetição mudam em "Todos".';
@@ -1183,6 +1254,12 @@ export function createGestao(ctx) {
             }
             const occ = t.closest('[data-occ]');
             if (occ) return openOccurrence(occ.dataset.occ);
+            if (t.closest('[data-open-filter]')) return openFilter();
+            if (t.closest('[data-clear-filter]')) { ui.catFilter = []; ui.tagFilter = []; return rerender(); }
+            const unCat = t.closest('[data-unfilter-cat]');
+            if (unCat) { ui.catFilter = ui.catFilter.filter(x => x !== unCat.dataset.unfilterCat); return rerender(); }
+            const unTag = t.closest('[data-unfilter-tag]');
+            if (unTag) { ui.tagFilter = ui.tagFilter.filter(x => !sameTag(x, unTag.dataset.unfilterTag)); return rerender(); }
             const filter = t.closest('[data-fin-filter]');
             if (filter) { ui.filter = filter.dataset.finFilter; return rerender(); }
             const go = t.closest('[data-goto]');
@@ -1265,6 +1342,24 @@ export function createGestao(ctx) {
             ui.entryCat = chip.dataset.cat;
             $('fin-entry-cats').querySelectorAll('[data-cat]').forEach(c => c.setAttribute('aria-pressed', String(c === chip)));
         });
+        $('fin-entry-tags').addEventListener('input', renderTagSuggest);
+        $('fin-entry-tag-suggest').addEventListener('click', (e) => {
+            const chip = e.target.closest('[data-add-tag]');
+            if (!chip) return;
+            const input = $('fin-entry-tags');
+            input.value = [...F.parseTags(input.value), chip.dataset.addTag].join(', ');
+            renderTagSuggest();
+        });
+
+        // Filtros
+        $('fin-filter-dialog').addEventListener('click', (e) => {
+            const cat = e.target.closest('[data-filter-cat]');
+            if (cat) { ui.catFilter = toggleIn(ui.catFilter, cat.dataset.filterCat); cat.setAttribute('aria-pressed', String(ui.catFilter.includes(cat.dataset.filterCat))); }
+            const tag = e.target.closest('[data-filter-tag]');
+            if (tag) { ui.tagFilter = toggleIn(ui.tagFilter, tag.dataset.filterTag, sameTag); tag.setAttribute('aria-pressed', String(F.hasTag(ui.tagFilter, tag.dataset.filterTag))); }
+        });
+        $('fin-filter-clear').addEventListener('click', () => { ui.catFilter = []; ui.tagFilter = []; renderFilter(); });
+        $('fin-filter-dialog').addEventListener('close', rerender);
         $('fin-entry-form').addEventListener('input', updateEntryPreview);
         $('fin-entry-form').addEventListener('change', updateEntryPreview);
         $('fin-entry-form').addEventListener('submit', saveEntry);

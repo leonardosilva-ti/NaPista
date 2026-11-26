@@ -1,6 +1,6 @@
 // Gestão na Pista: regras de finanças pessoais (contas, lançamentos e cartões).
 // Sem dependência de DOM. Datas sempre como "AAAA-MM-DD" no fuso do aparelho.
-import { num, toDateKey, parseDateKey, dayNet, dayGross, dayExpenses, dailyTarget, workWeekdays } from './logic.js?v=2.7.1';
+import { num, toDateKey, parseDateKey, dayNet, dayGross, dayExpenses, dailyTarget, workWeekdays } from './logic.js?v=2.8.0';
 
 export const WALLET_ID = 'carteira';
 export const APPS_CATEGORY_ID = 'r_apps';
@@ -98,6 +98,44 @@ export const daysBetween = (a, b) => Math.round((parseDateKey(b) - parseDateKey(
 
 export const monthRange = (ym) => ({ start: `${ym}-01`, end: dayIn(ym, 31) });
 
+// ── Tags ──────────────────────────────────────────────────────────────
+export const MAX_TAGS = 10;
+const tagKey = (t) => t.toLocaleLowerCase('pt-BR');
+
+/** Limpa uma lista de tags: sem espaços sobrando, sem repetidas (maiúsculas não contam). */
+export function normalizeTags(list) {
+    const seen = new Set();
+    const out = [];
+    for (const raw of Array.isArray(list) ? list : []) {
+        const t = String(raw ?? '').replace(/\s+/g, ' ').trim().slice(0, 30);
+        if (!t || seen.has(tagKey(t))) continue;
+        seen.add(tagKey(t));
+        out.push(t);
+        if (out.length >= MAX_TAGS) break;
+    }
+    return out;
+}
+
+/** "mercado, Viagem ,  trabalho" → ['mercado', 'Viagem', 'trabalho'] */
+export const parseTags = (text) => normalizeTags(String(text || '').split(','));
+
+export const hasTag = (tags, tag) => (tags || []).some(t => tagKey(t) === tagKey(tag));
+
+/** Tags usadas nos lançamentos, das mais usadas para as menos. */
+export function allTags(data) {
+    const count = new Map();
+    const add = (tags) => (tags || []).forEach(t => {
+        const k = tagKey(t);
+        const cur = count.get(k);
+        if (cur) cur.n++; else count.set(k, { tag: t, n: 1 });
+    });
+    for (const e of data.finance.entries) {
+        add(e.tags);
+        Object.values(e.overrides || {}).forEach(ov => add(ov.tags));
+    }
+    return [...count.values()].sort((a, b) => b.n - a.n || a.tag.localeCompare(b.tag, 'pt-BR')).map(x => x.tag);
+}
+
 // ── Normalização ──────────────────────────────────────────────────────
 const clampDay = (v, def) => {
     const n = Math.round(num(v));
@@ -157,6 +195,10 @@ export function normalizeFinance(raw) {
                 rec: normalizeRec(e.rec),
                 createdAt: num(e.createdAt) || 0
             };
+            const note = String(e.note || '').trim().slice(0, 500);
+            if (note) out.note = note;
+            const tags = normalizeTags(e.tags);
+            if (tags.length) out.tags = tags;
             if (e.cardId) out.cardId = e.cardId;
             else out.accountId = accIds.has(e.accountId) ? e.accountId : WALLET_ID;
             if (Number.isInteger(e.endIdx) && e.endIdx >= 0) out.endIdx = e.endIdx;
@@ -234,6 +276,8 @@ export function expandEntry(e, fromKey, toKey) {
             type: e.type,
             desc: ov?.desc ?? e.desc,
             categoryId: ov?.categoryId ?? e.categoryId,
+            note: ov?.note ?? e.note ?? '',
+            tags: ov?.tags ?? e.tags ?? [],
             accountId: e.cardId ? null : (ov?.accountId ?? e.accountId),
             cardId: e.cardId || null,
             kind,
