@@ -1,6 +1,6 @@
 // Gestão na Pista: telas do controle financeiro (resumo, lançamentos, cartões e contas).
-import * as L from './logic.js?v=2.10.1';
-import * as F from './finance.js?v=2.10.1';
+import * as L from './logic.js?v=2.10.2';
+import * as F from './finance.js?v=2.10.2';
 
 export const GESTAO_SCREENS = ['fin-home-screen', 'fin-entries-screen', 'fin-cards-screen', 'fin-accounts-screen'];
 
