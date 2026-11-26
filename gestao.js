@@ -1,6 +1,6 @@
 // Gestão na Pista: telas do controle financeiro (resumo, lançamentos, cartões e contas).
-import * as L from './logic.js?v=2.8.0';
-import * as F from './finance.js?v=2.8.0';
+import * as L from './logic.js?v=2.8.1';
+import * as F from './finance.js?v=2.8.1';
 
 export const GESTAO_SCREENS = ['fin-home-screen', 'fin-entries-screen', 'fin-cards-screen', 'fin-accounts-screen'];
 
@@ -340,7 +340,8 @@ export function createGestao(ctx) {
 
     // ── Filtros por categoria e tag ──
     function matchesFilter(o) {
-        if (ui.catFilter.length && !ui.catFilter.includes(o.categoryId)) return false;
+        // compara com a categoria mostrada na linha (a de um lançamento sem categoria válida é "Outros")
+        if (ui.catFilter.length && !ui.catFilter.includes(categoryOf(o.categoryId, o.type).id)) return false;
         if (ui.tagFilter.length && !ui.tagFilter.some(t => F.hasTag(o.tags, t))) return false;
         return true;
     }
@@ -350,7 +351,9 @@ export function createGestao(ctx) {
         const chips = [
             ...ui.catFilter.map(id => {
                 const c = categoryOf(id);
-                return `<button type="button" class="chip chip-active" data-unfilter-cat="${esc(id)}" aria-label="Tirar filtro ${esc(c.name)}"><span class="plat-dot" style="--c:${esc(c.color)}"></span>${esc(c.name)}${ICON_X}</button>`;
+                const dup = fin().categories.some(x => x.id !== c.id && x.name.toLowerCase() === c.name.toLowerCase());
+                const name = dup ? `${c.name} (${c.type === 'income' ? 'receita' : 'despesa'})` : c.name;
+                return `<button type="button" class="chip chip-active" data-unfilter-cat="${esc(id)}" aria-label="Tirar filtro ${esc(name)}"><span class="plat-dot" style="--c:${esc(c.color)}"></span>${esc(name)}${ICON_X}</button>`;
             }),
             ...ui.tagFilter.map(t => `<button type="button" class="chip chip-active" data-unfilter-tag="${esc(t)}" aria-label="Tirar filtro ${esc(t)}">#${esc(t)}${ICON_X}</button>`)
         ].join('');
@@ -368,9 +371,13 @@ export function createGestao(ctx) {
     }
 
     function renderFilter() {
-        const cats = [...categoriesOf('expense'), ...fin().categories.filter(c => c.type === 'income')];
-        $('fin-filter-cats').innerHTML = cats.map(c => `
-            <button type="button" class="chip cat-chip" data-filter-cat="${esc(c.id)}" aria-pressed="${ui.catFilter.includes(c.id)}"><span class="plat-dot" style="--c:${esc(c.color)}"></span>${esc(c.name)}</button>`).join('');
+        // despesas e receitas separadas: as duas têm um "Outros", por exemplo
+        const group = (label, cats) => `
+            <span class="filter-group">${label}</span>
+            <div class="chips chips-sm cat-chips" role="group" aria-label="Categorias de ${label.toLowerCase()}">${cats.map(c => `
+                <button type="button" class="chip cat-chip" data-filter-cat="${esc(c.id)}" aria-pressed="${ui.catFilter.includes(c.id)}"><span class="plat-dot" style="--c:${esc(c.color)}"></span>${esc(c.name)}</button>`).join('')}
+            </div>`;
+        $('fin-filter-cats').innerHTML = group('Despesas', categoriesOf('expense')) + group('Receitas', fin().categories.filter(c => c.type === 'income'));
         // tags marcadas que não existem mais continuam aparecendo para poder desmarcar
         const tags = F.allTags(data());
         ui.tagFilter.forEach(t => { if (!F.hasTag(tags, t)) tags.push(t); });

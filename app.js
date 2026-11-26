@@ -1,9 +1,9 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.8.0';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.8.0';
-import * as L from './logic.js?v=2.8.0';
-import * as P from './plans.js?v=2.8.0';
-import * as F from './finance.js?v=2.8.0';
-import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.8.0';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.8.1';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.8.1';
+import * as L from './logic.js?v=2.8.1';
+import * as P from './plans.js?v=2.8.1';
+import * as F from './finance.js?v=2.8.1';
+import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.8.1';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
