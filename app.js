@@ -1,9 +1,9 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.10.0';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.10.0';
-import * as L from './logic.js?v=2.10.0';
-import * as P from './plans.js?v=2.10.0';
-import * as F from './finance.js?v=2.10.0';
-import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.10.0';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.10.1';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.10.1';
+import * as L from './logic.js?v=2.10.1';
+import * as P from './plans.js?v=2.10.1';
+import * as F from './finance.js?v=2.10.1';
+import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.10.1';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -814,8 +814,7 @@ function renderHero(r) {
         $('hero-sub').textContent = r.error;
         $('hero-badge').textContent = '—';
         $('hero-progress').style.width = '0%';
-        $('hero-net').textContent = brl(r.summary.net);
-        $('hero-target').textContent = '—';
+        $('hero-gross').textContent = brl(r.summary.gross);
         fix.hidden = false;
         return;
     }
@@ -824,15 +823,13 @@ function renderHero(r) {
     $('hero-badge').textContent = `${pct}%`;
     $('hero-progress').style.width = `${pct}%`;
     $('hero-progressbar').setAttribute('aria-valuenow', pct);
-    $('hero-net').textContent = brl(r.summary.net);
-    $('hero-target').textContent = brl(r.meta);
+    $('hero-gross').textContent = brl(r.summary.gross);
 
     if (r.antesDoInicio) {
         hero.dataset.state = 'done';
         $('hero-label').textContent = 'Antes do seu início no app';
         $('hero-value').textContent = 'Meta considerada batida';
         $('hero-sub').textContent = `você começou em ${fullDate(settings().dataInicio)}`;
-        $('hero-target').textContent = '—';
         return;
     }
 
@@ -842,7 +839,6 @@ function renderHero(r) {
         if (r.metaBruta != null) {
             $('hero-value').textContent = `+ ${brl(r.excedenteBruto)}`;
             $('hero-sub').textContent = `bruto acima da meta · + ${brl(r.excedente)} líquido`;
-            $('hero-target').textContent = `${brl(r.metaBruta)} bruto`;
         } else {
             $('hero-value').textContent = `+ ${brl(r.excedente)}`;
             $('hero-sub').textContent = 'acima da meta líquida';
@@ -861,7 +857,7 @@ function renderHero(r) {
         const label = { day: 'Falta faturar no dia', week: 'Falta faturar na semana', month: 'Falta faturar no mês' }[state.scope];
         $('hero-label').textContent = label;
         $('hero-value').textContent = brl(r.brutoFaltante);
-        $('hero-sub').textContent = `bruto · cerca de ${fmt(r.kmFaltante, 0)} km a mais · ${brl(r.faltaLiquido)} líquido`;
+        $('hero-sub').textContent = `Cerca de ${fmt(r.kmFaltante, 0)} km`;
         if (state.scope !== 'day' && r.diasRestantes > 0) {
             tip.hidden = false;
             tip.textContent = r.diasRestantes === 1
