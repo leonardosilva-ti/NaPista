@@ -1,6 +1,6 @@
 // Gestão na Pista: telas do controle financeiro (resumo, lançamentos, cartões e contas).
-import * as L from './logic.js?v=2.7.0';
-import * as F from './finance.js?v=2.7.0';
+import * as L from './logic.js?v=2.7.1';
+import * as F from './finance.js?v=2.7.1';
 
 export const GESTAO_SCREENS = ['fin-home-screen', 'fin-entries-screen', 'fin-cards-screen', 'fin-accounts-screen'];
 
@@ -495,7 +495,7 @@ export function createGestao(ctx) {
                         <button type="button" role="tab" class="seg-btn${integ.mode === 'gross' ? ' active' : ''}" data-integ-mode="gross" aria-selected="${integ.mode === 'gross'}">Bruto</button>
                     </div>
                     <p class="hint" style="margin-top:0">${integ.mode === 'gross'
-                        ? 'Bruto: entra tudo o que os apps pagaram. Lance o combustível e os outros custos aqui na gestão.'
+                        ? 'Bruto: entra o que os apps pagaram menos os gastos do dia lançados no Na Pista. Lance o combustível aqui na gestão.'
                         : 'Líquido: entra o que sobra depois do combustível estimado e dos gastos do dia lançados no Na Pista.'}</p>
                 </div>
                 <div class="grid-2">

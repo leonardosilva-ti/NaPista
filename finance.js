@@ -1,6 +1,6 @@
 // Gestão na Pista: regras de finanças pessoais (contas, lançamentos e cartões).
 // Sem dependência de DOM. Datas sempre como "AAAA-MM-DD" no fuso do aparelho.
-import { num, toDateKey, parseDateKey, dayNet, dayGross, dailyTarget, workWeekdays } from './logic.js?v=2.7.0';
+import { num, toDateKey, parseDateKey, dayNet, dayGross, dayExpenses, dailyTarget, workWeekdays } from './logic.js?v=2.7.1';
 
 export const WALLET_ID = 'carteira';
 export const APPS_CATEGORY_ID = 'r_apps';
@@ -248,7 +248,8 @@ export function expandEntry(e, fromKey, toKey) {
 /**
  * Ganhos lançados no Na Pista viram lançamentos da gestão (não são copiados:
  * alterar o dia no Na Pista já muda aqui). Líquido = bruto − combustível
- * estimado − gastos do dia; bruto = o que os apps pagaram.
+ * estimado − gastos do dia; bruto = o que os apps pagaram − gastos do dia
+ * (o combustível, no bruto, é lançado na própria gestão).
  */
 export function napistaOccurrences(data, fromKey, toKey) {
     const fin = data.finance;
@@ -258,7 +259,7 @@ export function napistaOccurrences(data, fromKey, toKey) {
     const out = [];
     for (const d of data.history) {
         if (d.date < lo || d.date > toKey) continue;
-        const v = mode === 'gross' ? dayGross(d) : dayNet(d, data.settings);
+        const v = mode === 'gross' ? dayGross(d) - dayExpenses(d) : dayNet(d, data.settings);
         if (Math.abs(v) < 0.005) continue;
         out.push({
             id: `np:${d.date}`,

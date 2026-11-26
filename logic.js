@@ -216,10 +216,6 @@ export function calculateTargets(scope, s, history, anchor, today = new Date()) 
     if (antesDoInicio) {
         return { ...base, progress: 1, metaAlcancada: true, antesDoInicio: true, excedente: Math.max(0, summary.net) };
     }
-    if (faltaLiquido <= 0) {
-        return { ...base, metaAlcancada: true, excedente: -faltaLiquido };
-    }
-
     // Eficiência real do período (se houver dados), senão as médias do perfil
     let ganhoKm = summary.km > 0 && summary.gross > 0 ? summary.gross / summary.km : num(s.mediaPagamentoKm);
     const custoKm = summary.km > 0 ? summary.fuel / summary.km : custoKmBase;
@@ -227,6 +223,17 @@ export function calculateTargets(scope, s, history, anchor, today = new Date()) 
     if (!(lucroKm > 0)) {
         ganhoKm = num(s.mediaPagamentoKm);
         lucroKm = lucroKmBase;
+    }
+
+    if (faltaLiquido <= 0) {
+        const excedente = -faltaLiquido;
+        // meta em bruto: o faturamento do período menos o bruto equivalente ao que passou da meta
+        const excedenteBruto = lucroKm > 0 ? Math.min(summary.gross, excedente / lucroKm * ganhoKm) : null;
+        return {
+            ...base, metaAlcancada: true, excedente,
+            excedenteBruto,
+            metaBruta: excedenteBruto == null ? null : summary.gross - excedenteBruto
+        };
     }
 
     const kmFaltante = faltaLiquido / lucroKm;

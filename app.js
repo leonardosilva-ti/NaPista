@@ -1,9 +1,9 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.7.0';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.7.0';
-import * as L from './logic.js?v=2.7.0';
-import * as P from './plans.js?v=2.7.0';
-import * as F from './finance.js?v=2.7.0';
-import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.7.0';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.7.1';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.7.1';
+import * as L from './logic.js?v=2.7.1';
+import * as P from './plans.js?v=2.7.1';
+import * as F from './finance.js?v=2.7.1';
+import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.7.1';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -829,8 +829,14 @@ function renderHero(r) {
     if (r.metaAlcancada) {
         hero.dataset.state = 'done';
         $('hero-label').textContent = `Meta ${word} batida`;
-        $('hero-value').textContent = `+ ${brl(r.excedente)}`;
-        $('hero-sub').textContent = 'acima da meta líquida';
+        if (r.metaBruta != null) {
+            $('hero-value').textContent = `+ ${brl(r.excedenteBruto)}`;
+            $('hero-sub').textContent = `bruto acima da meta · + ${brl(r.excedente)} líquido`;
+            $('hero-target').textContent = `${brl(r.metaBruta)} bruto`;
+        } else {
+            $('hero-value').textContent = `+ ${brl(r.excedente)}`;
+            $('hero-sub').textContent = 'acima da meta líquida';
+        }
         if (r.status === 'current') {
             tip.hidden = false;
             tip.textContent = 'Tudo o que entrar agora é lucro extra. Uma folga também vale.';
@@ -877,6 +883,7 @@ function renderFinanceDayHint() {
     const text = state.scope === 'day' && P.can.finance() ? gestao.dayHint(dayKey()) : '';
     el.hidden = !text;
     el.textContent = text;
+    $('fin-exp-hint').hidden = !(P.can.finance() && state.data.finance?.setupDone);
 }
 
 function renderExpenses(sum) {
