@@ -399,7 +399,8 @@ function showScreen(id) {
     $('appbar').hidden = !(isMain || id === 'setup-screen');
     document.body.classList.toggle('has-nav', isMain);
     document.body.classList.toggle('mode-gestao', isGestao);
-    $('brand-name').textContent = isGestao ? 'Gestão na Pista' : 'Na Pista';
+    $('brand-name').textContent = isGestao ? 'Gestão' : 'Na Pista';
+    $('brand-sub').hidden = !isGestao;
     // o botão de troca aparece nas telas principais (não no cadastro inicial)
     const sw = $('btn-switch-mode');
     sw.hidden = !isMain;

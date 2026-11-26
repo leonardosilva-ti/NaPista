@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=2.7.1">
+    <link rel="stylesheet" href="style.css?v=2.7.2">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -25,7 +25,7 @@
     <header class="appbar" id="appbar" hidden>
         <div class="brand">
             <img src="./icon.svg" alt="" width="30" height="30">
-            <span id="brand-name">Na Pista</span>
+            <span class="brand-text"><span id="brand-name">Na Pista</span><small class="brand-sub" id="brand-sub" hidden>Na Pista</small></span>
         </div>
         <div class="appbar-actions">
             <button type="button" class="mode-switch" id="btn-switch-mode" hidden aria-label="Abrir a Gestão na Pista" title="Alternar entre Na Pista e Gestão na Pista">
@@ -786,7 +786,7 @@
         <button type="button" class="toast-action" id="toast-action" hidden></button>
     </div>
 
-    <script src="app.js?v=2.7.1" type="module"></script>
+    <script src="app.js?v=2.7.2" type="module"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {

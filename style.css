@@ -763,7 +763,10 @@ body.mode-gestao .toast { bottom: calc(var(--nav-h) + var(--safe-b) + 86px); }
 #choice-options .btn { width: 100%; }
 .brand { min-width: 0; }
 .brand span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-body.mode-gestao .brand { font-size: 1rem; gap: 8px; }
+body.mode-gestao .brand { gap: 8px; }
+.brand-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.1; }
+.brand-sub { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-2); }
+.brand-sub[hidden] { display: none; }
 @media (max-width: 400px) { body.mode-gestao .brand img { width: 26px; height: 26px; } .appbar-actions { gap: 6px; } }
 
 /* pagamentos de fatura e transferências */
