@@ -309,8 +309,8 @@ export const isVariableTarget = (s) => s?.metaVariavel === true && (s.metaVarSob
  * restam (incluindo o dia): sobe quando faltou e/ou desce quando passou,
  * conforme as opções. Dias futuros usam o valor de hoje; o que passar hoje já
  * diminui os próximos dias, o que ainda não foi lançado hoje não aumenta.
- * Com metas somadas à meta do dia (`goals`), o que passa da meta normal vai
- * primeiro para elas: só o que sobrar depois delas diminui os próximos dias.
+ * Com metas somadas à meta do dia (`goals`), a parte delas no dia sai do que
+ * passou da meta normal; só o que sobrar depois dela diminui os próximos dias.
  */
 export function dayTarget(s, history, key, today = new Date(), goals = []) {
     const daily = orderGoals(goals || [], today).filter(isDailyGoal);
@@ -326,11 +326,26 @@ const nextMonthKey = (ms) => {
 };
 
 /**
+ * Parte de uma meta somada à meta do dia no dia `k`: o que ainda falta dela
+ * (`remaining`) dividido pelos dias de trabalho dela que restam, incluindo `k`.
+ * É o máximo que ela recebe no dia (numa folga trabalhada também); se o dia ficar abaixo, o que faltou se
+ * divide pelos próximos dias dela.
+ */
+function dailyGoalCap(s, g, k, remaining) {
+    if (!(remaining > 0) || k < g.startDate || k > g.deadline) return 0;
+    const wd = goalWeekdaysOf(g);
+    const d = parseDateKey(k);
+    // folga do perfil trabalhada também leva a parte de um dia da meta
+    if (!wd.includes(d.getDay()) && workWeekdays(s).includes(d.getDay())) return 0;
+    return remaining / Math.max(1, countWorkDays(d, parseDateKey(g.deadline), wd));
+}
+
+/**
  * Meta normal de cada dia (meta variável e folgas), mês a mês, junto com o que
  * as metas somadas à meta do dia (`dailyGoals`, na ordem da cascata) levam de
- * cada dia: primeiro a meta normal; o que passar dela vai para essas metas até
- * completarem, e só o resto conta como excedente para os próximos dias.
- * Folga não tem meta normal: tudo o que entrar vai primeiro para essas metas.
+ * cada dia: primeiro a meta normal; depois cada uma recebe só a parte dela no
+ * dia, e o resto fica com a meta normal (excedente para os próximos dias).
+ * Folga não tem meta normal: o que entrar vai primeiro para a parte delas.
  */
 function targetPlan(s, history, dailyGoals, today) {
     const tk = toDateKey(startOfDay(today));
@@ -347,7 +362,7 @@ function targetPlan(s, history, dailyGoals, today) {
         for (const g of dailyGoals) {
             if (left <= 0) break;
             if (k < g.startDate || k > g.deadline) continue;
-            const u = Math.min(left, rem.get(g.id));
+            const u = Math.min(left, dailyGoalCap(s, g, k, rem.get(g.id)));
             if (!(u > 0)) continue;
             rem.set(g.id, rem.get(g.id) - u);
             left -= u;
@@ -446,7 +461,8 @@ export function goalDailyShare(g) {
  * Acréscimo de cada dia entre `fromKey` e `toKey` pelas metas somadas à meta do
  * dia: Map(data → [{ goal, value }]). Cada dia de trabalho da meta recebe o que
  * faltava no começo do dia dividido pelos dias de trabalho que restam (incluindo
- * ele): o que passa da meta do dia vai para a meta e diminui os próximos dias.
+ * ele). A meta recebe no máximo esse valor no dia; o que faltar aumenta os
+ * próximos dias dela, e o que passar fica com a meta normal.
  */
 export function goalDailyExtras(goals, s, history, fromKey, toKey, today = new Date()) {
     const out = new Map();
@@ -548,20 +564,32 @@ export function allocateGoals(order, history, s, skipKey = null, today = new Dat
             if (k < g.startDate) continue;
             if (k > g.deadline || got >= meta) break;
             const total = avail.get(k);
-            // somada à meta do dia: só o que passa da meta normal do dia conta para ela
-            const reserve = daily && total > 0 ? Math.min(total, plan.target(k)) : 0;
-            const a = total - reserve;
-            if (daily && !(a > 0)) continue;
+            if (daily) {
+                // somada à meta do dia: primeiro a meta normal; depois a meta recebe
+                // só a parte dela no dia. O que passar disso fica com a meta normal.
+                if (!(total > 0)) continue;
+                const reserve = Math.min(total, plan.target(k));
+                const a = Math.min(total - reserve, dailyGoalCap(s, g, k, meta - got));
+                if (!(a > 1e-9)) continue;
+                const part = availGross.get(k) * (a / total);
+                got += a;
+                gross += part;
+                avail.set(k, total - a);
+                availGross.set(k, availGross.get(k) - part);
+                trace.push([k, got]);
+                continue;
+            }
+            const a = total;
             if (!a && !availGross.get(k)) continue;
             if (got + a <= meta) {
                 got += a;
-                const part = reserve > 0 ? availGross.get(k) * (a / total) : availGross.get(k);
+                const part = availGross.get(k);
                 gross += part;
-                avail.set(k, reserve);
+                avail.set(k, 0);
                 availGross.set(k, availGross.get(k) - part);
             } else {
                 const used = meta - got;
-                const part = availGross.get(k) * (used / (reserve > 0 ? total : a));
+                const part = availGross.get(k) * (used / a);
                 avail.set(k, total - used);
                 availGross.set(k, availGross.get(k) - part);
                 gross += part;
