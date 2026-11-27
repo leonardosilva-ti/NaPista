@@ -1,6 +1,6 @@
 // Gestão na Pista: telas do controle financeiro (resumo, lançamentos, cartões e contas).
-import * as L from './logic.js?v=2.11.2';
-import * as F from './finance.js?v=2.11.2';
+import * as L from './logic.js?v=2.12.0';
+import * as F from './finance.js?v=2.12.0';
 
 export const GESTAO_SCREENS = ['fin-home-screen', 'fin-entries-screen', 'fin-cards-screen', 'fin-accounts-screen'];
 
@@ -281,7 +281,9 @@ export function createGestao(ctx) {
     /** Liga/desliga da previsão com metas (meta líquida diária nos dias ainda não lançados). */
     function forecastCard(on, hint) {
         const can = F.canForecast(data());
-        const daily = can ? L.dailyTarget(data().settings, L.parseDateKey(`${ui.month}-01`)) : 0;
+        const tk = L.toDateKey(new Date());
+        // meta em vigor hoje (no mês atual) ou no começo do mês mostrado
+        const daily = can ? L.dailyTarget(data().settings, L.parseDateKey(tk.slice(0, 7) === ui.month ? tk : `${ui.month}-01`)) : 0;
         const sub = !can
             ? 'Defina a meta mensal no Na Pista (Ajustes) para usar a previsão.'
             : on ? `${hint}. Meta de ${brl(daily)} líquidos por dia.`

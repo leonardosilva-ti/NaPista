@@ -1,9 +1,9 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.11.2';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.11.2';
-import * as L from './logic.js?v=2.11.2';
-import * as P from './plans.js?v=2.11.2';
-import * as F from './finance.js?v=2.11.2';
-import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.11.2';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.12.0';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.12.0';
+import * as L from './logic.js?v=2.12.0';
+import * as P from './plans.js?v=2.12.0';
+import * as F from './finance.js?v=2.12.0';
+import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.12.0';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -138,6 +138,11 @@ function normalizeData(raw) {
         delete g.showOnHome; // opção antiga "mostrar no início", não usada mais
         if (g.addToDaily !== true) delete g.addToDaily;
     });
+    const hist = Array.isArray(data.settings.metaHist)
+        ? data.settings.metaHist.filter(c => c && /^\d{4}-\d{2}-\d{2}$/.test(c.from) && L.num(c.valor) > 0)
+        : [];
+    if (hist.length > 1) data.settings.metaHist = hist.map(c => ({ from: c.from, valor: L.num(c.valor) }));
+    else delete data.settings.metaHist;
     data.finance = F.normalizeFinance(data.finance);
     return data;
 }
@@ -632,7 +637,7 @@ function addCustomPlatform() {
     renderSetupPlatforms();
 }
 
-function saveSetup(e) {
+async function saveSetup(e) {
     e.preventDefault();
     const f = readSetupForm();
     const fail = (msg, id) => { toast(msg, { type: 'error' }); if (id) $(id).focus(); };
@@ -651,7 +656,25 @@ function saveSetup(e) {
     const plataformas = state.setupOptions.filter(p => state.setupPlatforms.includes(p));
     // primeiro cadastro (ou depois de apagar os dados): hoje é o "dia 0"
     const dataInicio = wasConfigured ? settings().dataInicio : L.toDateKey(todayDate());
+    // meta alterada: o que já passou fica com a meta antiga; pergunta quando a nova vale
+    let metaHist = wasConfigured ? settings().metaHist : undefined;
+    if (wasConfigured && f.metaLiquidaMensal !== L.num(settings().metaLiquidaMensal)) {
+        const t = todayDate();
+        const nextMonth = new Date(t.getFullYear(), t.getMonth() + 1, 1);
+        const when = await choiceDialog({
+            title: 'Quando a nova meta começa a valer?',
+            message: `Os dias que já passaram continuam com a meta antiga. Neste mês, o que faltar para ${brl(f.metaLiquidaMensal)} se divide pelos dias de trabalho que restam.`,
+            options: [
+                { label: 'Já neste mês, a partir de hoje', value: 'now' },
+                { label: `No próximo mês (${MONTHS[nextMonth.getMonth()].toLowerCase()})`, value: 'next' }
+            ]
+        });
+        if (!when) return;
+        metaHist = L.withMetaChange(settings(), f.metaLiquidaMensal, L.toDateKey(when === 'now' ? t : nextMonth));
+    }
     state.data.settings = { ...settings(), ...f, plataformas, dataInicio };
+    if (metaHist?.length > 1) state.data.settings.metaHist = metaHist;
+    else delete state.data.settings.metaHist;
     renderPlatformInputs();
     markChanged(0);
     toast(wasConfigured ? 'Metas atualizadas.' : 'Tudo pronto! Bom trabalho na pista.');
@@ -1567,7 +1590,8 @@ function renderProfile() {
     const s = settings();
     const lucroKm = L.num(s.mediaPagamentoKm) - L.num(s.mediaPrecoCombustivel) / L.num(s.mediaConsumoL);
     const rows = [
-        ['Meta líquida mensal', brl(L.num(s.metaLiquidaMensal))],
+        ['Meta líquida mensal', brl(L.monthlyGoalAt(s, L.toDateKey(todayDate())))],
+        ...L.metaChanges(s).filter(c => c.from > L.toDateKey(todayDate())).map(c => [`A partir de ${fullDate(c.from)}`, brl(L.num(c.valor))]),
         ['Dias de trabalho', weekdaysLabel(L.workWeekdays(s))],
         ['Meta líquida por dia', brl(L.dailyTarget(s, new Date()))],
         ['Meta variável', !L.isVariableTarget(s) ? 'Desligada' : s.metaVarSobe === false ? 'Só diminui' : s.metaVarDesce === false ? 'Só aumenta' : 'Aumenta e diminui'],

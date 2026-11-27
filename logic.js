@@ -197,8 +197,8 @@ export function calculateTargets(scope, s, history, anchor, today = new Date(), 
     const metaVar = scope === 'day' && !folga ? dayTarget(s, history, startKey, today, goals) - metaBase : 0;
     const metaDia = metaBase + metaVar + (scope === 'day' ? metaExtra : 0);
     let metaCheia = scope === 'day' ? metaDia
-        : scope === 'week' ? num(s.metaLiquidaMensal) / WEEKS_PER_MONTH
-        : num(s.metaLiquidaMensal);
+        : scope === 'week' ? weekGoal(s, start)
+        : monthGoal(s, start);
 
     // "Dia 0": os dias antes do início no app contam como meta batida, sem
     // lançar nada no histórico. Se o usuário lançou algum desses dias, ele
@@ -289,6 +289,22 @@ export function calculateTargets(scope, s, history, anchor, today = new Date(), 
 }
 
 
+/** Meta do mês de `d`: a soma da meta de cada dia de trabalho (com as alterações do mês). */
+function monthGoal(s, d) {
+    const { start, end } = getMonthRange(d);
+    const weekdays = workWeekdays(s);
+    let total = 0;
+    for (let x = start; x <= end; x = addDays(x, 1)) if (weekdays.includes(x.getDay())) total += dailyTarget(s, x);
+    return total;
+}
+
+/** Meta da semana que começa em `start`: meta mensal ÷ semanas do mês, com a meta em vigor em cada dia. */
+function weekGoal(s, start) {
+    let total = 0;
+    for (let i = 0, x = start; i < 7; i++, x = addDays(x, 1)) total += monthlyGoalAt(s, toDateKey(x));
+    return total / 7 / WEEKS_PER_MONTH;
+}
+
 // ── Metas com prazo (objetivos) ───────────────────────────────────────
 export const ALL_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
 
@@ -374,8 +390,8 @@ function targetPlan(s, history, dailyGoals, today) {
         const d0 = parseDateKey(ms);
         const end = getMonthRange(d0).end;
         const me = toDateKey(end);
-        const base = dailyTarget(s, d0);
         const inicio = typeof s.dataInicio === 'string' && s.dataInicio > ms ? s.dataInicio : ms;
+        let base = 0;
         const clamp = (v) => {
             if (!variable || s.metaVarSobe === false) v = Math.min(base, v);
             if (variable && s.metaVarDesce === false) v = Math.max(base, v);
@@ -384,6 +400,8 @@ function targetPlan(s, history, dailyGoals, today) {
         let cum = 0, rawToday = null, future = null;
         for (let d = d0, k = ms; k <= me; d = addDays(d, 1), k = toDateKey(d)) {
             const work = weekdays.includes(d.getDay());
+            // meta normal em vigor no dia (alterações da meta valem só dali em diante)
+            base = dailyTarget(s, d);
             const raw = base - cum / Math.max(1, countWorkDays(d, end, weekdays));
             if (k === tk) rawToday = raw;
             let v;
@@ -418,8 +436,54 @@ function targetPlan(s, history, dailyGoals, today) {
 
 /** Meta líquida diária: meta mensal dividida pelos dias de trabalho do mês. */
 export function dailyTarget(s, d = new Date()) {
-    const dias = workDaysInMonth(s, d);
-    return dias > 0 ? num(s.metaLiquidaMensal) / dias : 0;
+    const { start, end } = getMonthRange(d);
+    const weekdays = workWeekdays(s);
+    const ms = toDateKey(start), me = toDateKey(end), key = toDateKey(d);
+    // alterações da meta no meio do mês: os dias antes ficam com a meta antiga e
+    // o que faltar para a meta nova do mês se divide pelos dias que restam
+    const changes = metaChanges(s).filter(c => c.from > ms && c.from <= me);
+    let segStart = start, value = monthlyGoalAt(s, ms), done = 0;
+    for (let i = 0; ; i++) {
+        const remaining = countWorkDays(segStart, end, weekdays);
+        const daily = remaining > 0 ? Math.max(0, (value - done) / remaining) : 0;
+        const next = changes[i];
+        if (!next || key < next.from) return daily;
+        done += daily * countWorkDays(segStart, addDays(parseDateKey(next.from), -1), weekdays);
+        segStart = parseDateKey(next.from);
+        value = num(next.valor);
+    }
+}
+
+/** Alterações da meta mensal ({ from, valor }), em ordem de data. */
+export function metaChanges(s) {
+    return (Array.isArray(s?.metaHist) ? s.metaHist : [])
+        .filter(c => c && typeof c.from === 'string')
+        .sort((a, b) => a.from.localeCompare(b.from));
+}
+
+/**
+ * Meta mensal em vigor no dia `key`. Sem histórico de alterações, é a meta
+ * configurada; com ele, a última alteração que já começou a valer.
+ */
+export function monthlyGoalAt(s, key) {
+    const hist = metaChanges(s);
+    if (!hist.length) return num(s?.metaLiquidaMensal);
+    let v = num(hist[0].valor);
+    for (const c of hist) { if (c.from <= key) v = num(c.valor); else break; }
+    return v;
+}
+
+/**
+ * Registra uma alteração da meta mensal para valer a partir de `from`: o que já
+ * passou continua com a meta antiga. Retorna o novo histórico.
+ */
+export function withMetaChange(s, valor, from) {
+    const hist = metaChanges(s);
+    const base = hist.length ? hist : [{ from: '0000-01-01', valor: num(s?.metaLiquidaMensal) }];
+    const kept = base.filter(c => c.from < from);
+    if (!kept.length) kept.push({ from: '0000-01-01', valor: num(base[0].valor) });
+    if (num(kept[kept.length - 1].valor) !== num(valor)) kept.push({ from, valor: num(valor) });
+    return kept;
 }
 
 /** Dias da semana de trabalho do perfil (ou uma sugestão para perfis antigos). */
