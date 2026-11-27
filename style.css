@@ -423,6 +423,16 @@ button.item-main { padding: 0; }
 .kv { display: grid; grid-template-columns: 1fr auto; gap: 10px 12px; font-size: 0.92rem; }
 .kv dt { color: var(--text-2); }
 .kv dd { font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+/* Ajustes: grupos em lista */
+#profile-screen .page-head + .subhead { margin-top: 4px; }
+.set-card { padding: 6px; }
+.set-row { color: inherit; }
+.set-row .item-value { font-weight: 600; color: var(--text-2); max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+.set-chev { width: 18px; height: 18px; flex: none; color: var(--text-3); }
+.set-danger .item-title { color: var(--danger); }
+.set-note { margin: -6px 4px 0; }
+.set-howto summary { cursor: pointer; font-weight: 600; }
+.set-howto .howto { margin-top: 12px; }
 .howto { padding-left: 20px; display: grid; gap: 8px; color: var(--text-2); font-size: 0.92rem; }
 .version { text-align: center; color: var(--text-3); font-size: 0.8rem; margin-top: 8px; }
 .made-by {

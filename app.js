@@ -1,9 +1,9 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.12.0';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.12.0';
-import * as L from './logic.js?v=2.12.0';
-import * as P from './plans.js?v=2.12.0';
-import * as F from './finance.js?v=2.12.0';
-import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.12.0';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.12.1';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.12.1';
+import * as L from './logic.js?v=2.12.1';
+import * as P from './plans.js?v=2.12.1';
+import * as F from './finance.js?v=2.12.1';
+import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.12.1';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -551,11 +551,19 @@ async function loadUserData() {
 }
 
 // ═══════════════════════ Configuração (metas) ═══════════════════════
-function openSetup() {
+const SETUP_SECTIONS = { meta: 'Meta', vehicle: 'Veículo e corridas', apps: 'Aplicativos' };
+
+/** Abre a configuração. Com `section` (já configurado), mostra só aquela parte. */
+function openSetup(section = null) {
     const s = settings();
     const configured = L.isConfigured(s);
-    $('setup-title').textContent = configured ? 'Editar metas' : 'Primeiros passos';
-    $('btn-finish-setup').textContent = configured ? 'Salvar alterações' : 'Salvar e começar';
+    state.setupSection = configured && SETUP_SECTIONS[section] ? section : null;
+    document.querySelectorAll('#setup-form [data-setup]').forEach(c => {
+        c.hidden = !!state.setupSection && c.dataset.setup !== state.setupSection;
+    });
+    $('setup-title').textContent = state.setupSection ? SETUP_SECTIONS[state.setupSection] : configured ? 'Editar metas' : 'Primeiros passos';
+    $('setup-sub').hidden = !!state.setupSection;
+    $('btn-finish-setup').textContent = state.setupSection ? 'Salvar' : configured ? 'Salvar alterações' : 'Salvar e começar';
     $('btn-cancel-setup').hidden = !configured;
 
     state.setupWeekdays = L.defaultWorkWeekdays(s);
@@ -677,8 +685,8 @@ async function saveSetup(e) {
     else delete state.data.settings.metaHist;
     renderPlatformInputs();
     markChanged(0);
-    toast(wasConfigured ? 'Metas atualizadas.' : 'Tudo pronto! Bom trabalho na pista.');
-    showScreen('dashboard-screen');
+    toast(wasConfigured ? 'Ajustes salvos.' : 'Tudo pronto! Bom trabalho na pista.');
+    showScreen(state.setupSection ? 'profile-screen' : 'dashboard-screen');
 }
 
 // ═══════════════════════ Início (dashboard) ═══════════════════════
@@ -1588,21 +1596,29 @@ async function deleteGoal(id) {
 function renderProfile() {
     if (!state.data) return;
     const s = settings();
+    const tk = L.toDateKey(todayDate());
     const lucroKm = L.num(s.mediaPagamentoKm) - L.num(s.mediaPrecoCombustivel) / L.num(s.mediaConsumoL);
-    const rows = [
-        ['Meta líquida mensal', brl(L.monthlyGoalAt(s, L.toDateKey(todayDate())))],
-        ...L.metaChanges(s).filter(c => c.from > L.toDateKey(todayDate())).map(c => [`A partir de ${fullDate(c.from)}`, brl(L.num(c.valor))]),
-        ['Dias de trabalho', weekdaysLabel(L.workWeekdays(s))],
-        ['Meta líquida por dia', brl(L.dailyTarget(s, new Date()))],
-        ['Meta variável', !L.isVariableTarget(s) ? 'Desligada' : s.metaVarSobe === false ? 'Só diminui' : s.metaVarDesce === false ? 'Só aumenta' : 'Aumenta e diminui'],
-        ['Ganho médio por km', brl(L.num(s.mediaPagamentoKm))],
-        ['Consumo médio', `${fmt(L.num(s.mediaConsumoL))} km/L`],
-        ['Preço do litro', brl(L.num(s.mediaPrecoCombustivel))],
-        ['Lucro estimado por km', brl(lucroKm)]
-    ];
-    if (s.dataInicio) rows.push(['Início no app', fullDate(s.dataInicio)]);
-    $('profile-settings').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
-    $('profile-platforms').innerHTML = s.plataformas.map(p => `<span class="chip"><span class="plat-dot" style="--c:${platformColor(p)}"></span>${esc(p)}</span>`).join('');
+    const chev = '<svg class="ico set-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>';
+    const row = (section, title, sub, value) => `<li><button type="button" class="list-item set-row" data-edit="${section}">
+        <span class="item-main"><span class="item-title">${title}</span>${sub ? `<span class="item-sub">${sub}</span>` : ''}</span>
+        ${value ? `<span class="item-value">${value}</span>` : ''}${chev}</button></li>`;
+    const scheduled = L.metaChanges(s).filter(c => c.from > tk)
+        .map(c => `${brl(L.num(c.valor))} a partir de ${fullDate(c.from)}`).join(' · ');
+    const variavel = !L.isVariableTarget(s) ? 'Desligada' : s.metaVarSobe === false ? 'Só diminui' : s.metaVarDesce === false ? 'Só aumenta' : 'Aumenta e diminui';
+    $('set-meta').innerHTML = [
+        row('meta', 'Meta líquida mensal', scheduled || `${brl(L.dailyTarget(s, new Date()))} por dia neste mês`, brl(L.monthlyGoalAt(s, tk))),
+        row('meta', 'Dias de trabalho', '', esc(weekdaysLabel(L.workWeekdays(s)))),
+        row('meta', 'Meta variável', 'Muda a meta do dia conforme os dias anteriores', variavel)
+    ].join('');
+    $('set-vehicle').innerHTML = [
+        row('vehicle', 'Ganho médio por km', `Lucro estimado de ${brl(lucroKm)} por km`, brl(L.num(s.mediaPagamentoKm))),
+        row('vehicle', 'Consumo médio', '', `${fmt(L.num(s.mediaConsumoL))} km/L`),
+        row('vehicle', 'Preço do litro', '', brl(L.num(s.mediaPrecoCombustivel)))
+    ].join('');
+    $('set-apps').innerHTML = row('apps', esc(s.plataformas.join(' · ')) || 'Nenhum aplicativo',
+        plural(s.plataformas.length, 'aplicativo', 'aplicativos'), '');
+    $('set-start-row').hidden = !s.dataInicio;
+    if (s.dataInicio) $('set-start').textContent = fullDate(s.dataInicio);
 }
 
 function exportBackup() {
@@ -2091,7 +2107,10 @@ function bindEvents() {
     });
 
     // Ajustes
-    $('btn-edit-goals').addEventListener('click', openSetup);
+    $('profile-screen').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-edit]');
+        if (b) openSetup(b.dataset.edit);
+    });
     $('btn-export').addEventListener('click', exportBackup);
     $('btn-logout').addEventListener('click', handleLogout);
     $('btn-wipe').addEventListener('click', handleWipe);

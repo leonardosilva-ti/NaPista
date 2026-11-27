@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=2.12.0">
+    <link rel="stylesheet" href="style.css?v=2.12.1">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -71,11 +71,11 @@
         <section id="setup-screen" class="screen">
             <div class="page-head">
                 <h1 id="setup-title">Primeiros passos</h1>
-                <p class="muted">Configure suas metas. Você pode alterar depois.</p>
+                <p class="muted" id="setup-sub">Configure suas metas. Você pode alterar depois.</p>
             </div>
 
             <form id="setup-form" novalidate>
-                <section class="card">
+                <section class="card" data-setup="meta">
                     <h2 class="card-title">Meta</h2>
                     <label class="field">
                         <span class="field-label">Meta líquida por mês</span>
@@ -103,7 +103,7 @@
                     </div>
                 </section>
 
-                <section class="card">
+                <section class="card" data-setup="vehicle">
                     <h2 class="card-title">Veículo e corridas</h2>
                     <label class="field">
                         <span class="field-label">Média que você aceita por km</span>
@@ -122,7 +122,7 @@
                     <div class="preview" id="setup-preview" hidden></div>
                 </section>
 
-                <section class="card">
+                <section class="card" data-setup="apps">
                     <h2 class="card-title">Aplicativos que você usa</h2>
                     <p class="muted small">Toque para selecionar.</p>
                     <div class="chips" id="setup-platforms" role="group" aria-label="Aplicativos"></div>
@@ -311,6 +311,16 @@
         <section id="profile-screen" class="screen">
             <div class="page-head"><h1>Ajustes</h1></div>
 
+            <h2 class="subhead">Meta</h2>
+            <section class="card set-card"><ul class="list list-select" id="set-meta"></ul></section>
+
+            <h2 class="subhead">Veículo e corridas</h2>
+            <section class="card set-card"><ul class="list list-select" id="set-vehicle"></ul></section>
+
+            <h2 class="subhead">Aplicativos</h2>
+            <section class="card set-card"><ul class="list list-select" id="set-apps"></ul></section>
+
+            <h2 class="subhead">Conta e dados</h2>
             <section class="card plan-card" id="plan-card" hidden>
                 <div class="card-head">
                     <h2 class="card-title">Seu plano</h2>
@@ -321,43 +331,35 @@
                     <button type="button" class="btn btn-primary" id="btn-plans">Ver planos</button>
                 </div>
             </section>
-
-            <section class="card">
-                <div class="card-head">
-                    <h2 class="card-title">Suas metas</h2>
-                    <button type="button" class="btn btn-soft btn-sm" id="btn-edit-goals">Editar</button>
-                </div>
-                <dl class="kv" id="profile-settings"></dl>
-                <div class="chips chips-static" id="profile-platforms"></div>
+            <section class="card set-card">
+                <ul class="list list-select">
+                    <li id="set-start-row" hidden><div class="list-item"><span class="item-main"><span class="item-title">Início no app</span><span class="item-sub">Dias antes disso contam como meta batida</span></span><span class="item-value" id="set-start"></span></div></li>
+                    <li><button type="button" class="list-item set-row" id="btn-export"><span class="item-main"><span class="item-title">Baixar backup</span><span class="item-sub">Arquivo .json com todos os seus dados</span></span><svg class="ico set-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg></button></li>
+                    <li><button type="button" class="list-item set-row" id="btn-logout"><span class="item-main"><span class="item-title">Sair da conta</span><span class="item-sub">Seus dados ficam salvos no Google Drive</span></span><svg class="ico set-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg></button></li>
+                    <li><button type="button" class="list-item set-row set-danger" id="btn-wipe"><span class="item-main"><span class="item-title">Apagar todos os dados</span><span class="item-sub">Não dá para desfazer</span></span></button></li>
+                </ul>
             </section>
+            <p class="hint set-note">Seus dados ficam na pasta privada do app no seu Google Drive.</p>
 
+            <h2 class="subhead">Sobre</h2>
             <section class="card install-card" id="install-card" hidden>
                 <h2 class="card-title">Instalar o app</h2>
                 <p class="muted small" id="install-desc">Tenha o Na Pista na tela inicial, abrindo em tela cheia como um app.</p>
                 <div class="stack"><button type="button" class="btn btn-primary" data-install>Instalar o Na Pista</button></div>
             </section>
-
             <section class="card">
-                <h2 class="card-title">Como funciona</h2>
-                <ol class="howto">
-                    <li>Ao longo do dia, lance quanto ganhou em cada app e os km rodados.</li>
-                    <li>O combustível é estimado pelos km, consumo e preço do litro.</li>
-                    <li>Gastos extras (almoço, pedágio, lavagem…) entram no cálculo do líquido.</li>
-                    <li>Na semana e no mês, a meta diária se ajusta ao que você já fez.</li>
-                </ol>
-            </section>
-
-            <section class="card">
-                <h2 class="card-title">Dados e conta</h2>
-                <p class="muted small">Salvos na pasta privada do app no seu Google Drive.</p>
-                <div class="stack">
-                    <button type="button" class="btn btn-ghost" id="btn-export">Baixar backup (.json)</button>
-                    <button type="button" class="btn btn-ghost" id="btn-logout">Sair da conta</button>
-                    <button type="button" class="btn btn-danger-ghost" id="btn-wipe">Apagar todos os dados</button>
-                </div>
+                <details class="set-howto">
+                    <summary>Como funciona</summary>
+                    <ol class="howto">
+                        <li>Ao longo do dia, lance quanto ganhou em cada app e os km rodados.</li>
+                        <li>O combustível é estimado pelos km, consumo e preço do litro.</li>
+                        <li>Gastos extras (almoço, pedágio, lavagem…) entram no cálculo do líquido.</li>
+                        <li>Na semana e no mês, a meta diária se ajusta ao que você já fez.</li>
+                    </ol>
+                </details>
             </section>
             <p class="made-by"><span class="covem-mark" aria-hidden="true"></span>Um app Covem.</p>
-            <p class="version">Na Pista · v2.12.0</p>
+            <p class="version">Na Pista · v2.12.1</p>
         </section>
         <!-- ═════════ GESTÃO NA PISTA ═════════ -->
         <section id="fin-home-screen" class="screen">
@@ -835,7 +837,7 @@
         <button type="button" class="toast-action" id="toast-action" hidden></button>
     </div>
 
-    <script src="app.js?v=2.12.0" type="module"></script>
+    <script src="app.js?v=2.12.1" type="module"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
