@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=2.12.2">
+    <link rel="stylesheet" href="style.css?v=2.12.3">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -166,7 +166,12 @@
 
             <section class="card hero" id="hero" data-state="progress">
                 <div class="hero-top">
-                    <span class="eyebrow" id="hero-label">Falta faturar hoje</span>
+                    <span class="hero-title">
+                        <span class="eyebrow" id="hero-label">Falta faturar hoje</span>
+                        <button type="button" class="info-btn" id="hero-info-btn" aria-label="Como a meta foi calculada" aria-expanded="false" aria-controls="hero-info" hidden>
+                            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+                        </button>
+                    </span>
                     <span class="badge" id="hero-badge">0%</span>
                 </div>
                 <div class="hero-value" id="hero-value">R$ 0,00</div>
@@ -178,6 +183,7 @@
                     <span>Bruto <strong id="hero-gross">R$ 0,00</strong></span>
                     <span>Meta <strong id="hero-target">R$ 0,00</strong></span>
                 </div>
+                <ul class="hero-info" id="hero-info" hidden></ul>
                 <p class="hero-tip" id="hero-tip" hidden></p>
                 <button type="button" class="btn btn-soft" id="hero-fix" hidden>Revisar metas</button>
             </section>
@@ -371,7 +377,7 @@
                 </details>
             </section>
             <p class="made-by"><span class="covem-mark" aria-hidden="true"></span>Um app Covem.</p>
-            <p class="version">Na Pista · v2.12.2</p>
+            <p class="version">Na Pista · v2.12.3</p>
         </section>
         <!-- ═════════ GESTÃO NA PISTA ═════════ -->
         <section id="fin-home-screen" class="screen">
@@ -849,7 +855,7 @@
         <button type="button" class="toast-action" id="toast-action" hidden></button>
     </div>
 
-    <script src="app.js?v=2.12.2" type="module"></script>
+    <script src="app.js?v=2.12.3" type="module"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {

@@ -1,9 +1,9 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.12.2';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.12.2';
-import * as L from './logic.js?v=2.12.2';
-import * as P from './plans.js?v=2.12.2';
-import * as F from './finance.js?v=2.12.2';
-import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.12.2';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.12.3';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.12.3';
+import * as L from './logic.js?v=2.12.3';
+import * as P from './plans.js?v=2.12.3';
+import * as F from './finance.js?v=2.12.3';
+import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.12.3';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -837,6 +837,14 @@ function renderHero(r) {
     const fix = $('hero-fix');
     tip.hidden = true;
     fix.hidden = true;
+    // detalhes de como a meta foi calculada: ficam atrás do botão (i)
+    const info = [];
+    const setInfo = () => {
+        $('hero-info').innerHTML = info.map(t => `<li>${esc(t)}</li>`).join('');
+        $('hero-info-btn').hidden = !info.length;
+        if (!info.length) toggleHeroInfo(false);
+    };
+    setInfo();
 
     if (r.error) {
         hero.dataset.state = 'error';
@@ -924,22 +932,24 @@ function renderHero(r) {
             : L.isVariableTarget(settings())
                 ? `Meta variável: − ${brl(-r.metaVar)} pelo que passou da meta nos dias anteriores do mês.`
                 : `− ${brl(-r.metaVar)} pelo que você fez nas folgas deste mês.`;
-        tip.textContent = tip.hidden ? note : `${tip.textContent} ${note}`;
-        tip.hidden = false;
+        info.push(note);
     }
 
     if (r.metaExtra > 0.004) {
         const names = r.metaExtraGoals.map(x => `"${goalTitle(x.goal)}"`).join(', ');
-        const note = `${r.metaExtraGoals.length === 1 ? 'Inclui' : 'Incluem'} ${brl(r.metaExtra)} da${r.metaExtraGoals.length === 1 ? ' meta' : 's metas'} ${names}.`;
-        tip.textContent = tip.hidden ? note : `${tip.textContent} ${note}`;
-        tip.hidden = false;
+        info.push(`${r.metaExtraGoals.length === 1 ? 'Inclui' : 'Incluem'} ${brl(r.metaExtra)} da${r.metaExtraGoals.length === 1 ? ' meta' : 's metas'} ${names}.`);
     }
 
     if (r.inicioParcial) {
-        const note = `Meta proporcional: os dias antes de ${shortDate(L.parseDateKey(r.inicioParcial))} (seu início) sem lançamentos contam como batidos.`;
-        tip.textContent = tip.hidden ? note : `${tip.textContent} ${note}`;
-        tip.hidden = false;
+        info.push(`Meta proporcional: os dias antes de ${shortDate(L.parseDateKey(r.inicioParcial))} (seu início) sem lançamentos contam como batidos.`);
     }
+    setInfo();
+}
+
+/** Mostra/esconde os detalhes da meta no cartão (botão i). */
+function toggleHeroInfo(open = $('hero-info').hidden) {
+    $('hero-info').hidden = !open;
+    $('hero-info-btn').setAttribute('aria-expanded', String(open));
 }
 
 function renderStats(sum) {
@@ -2057,6 +2067,7 @@ function bindEvents() {
         if (e.target.value) setAnchor(L.parseDateKey(e.target.value));
     });
     $('hero-fix').addEventListener('click', openSetup);
+    $('hero-info-btn').addEventListener('click', () => toggleHeroInfo());
 
     $('btn-add-expense').addEventListener('click', () => openExpenseDialog());
     $('expense-list').addEventListener('click', (e) => {
