@@ -433,6 +433,10 @@ button.item-main { padding: 0; }
 .set-note { margin: -6px 4px 0; }
 .set-howto summary { cursor: pointer; font-weight: 600; }
 .set-howto .howto { margin-top: 12px; }
+.set-install { padding: 6px 18px; }
+.set-install .set-howto { padding: 12px 0; }
+.set-install .set-howto + .set-howto { border-top: 1px solid var(--border); }
+.set-install .hint { margin-bottom: 2px; }
 .howto { padding-left: 20px; display: grid; gap: 8px; color: var(--text-2); font-size: 0.92rem; }
 .version { text-align: center; color: var(--text-3); font-size: 0.8rem; margin-top: 8px; }
 .made-by {

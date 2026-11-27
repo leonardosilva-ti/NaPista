@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=2.12.1">
+    <link rel="stylesheet" href="style.css?v=2.12.2">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -347,6 +347,18 @@
                 <p class="muted small" id="install-desc">Tenha o Na Pista na tela inicial, abrindo em tela cheia como um app.</p>
                 <div class="stack"><button type="button" class="btn btn-primary" data-install>Instalar o Na Pista</button></div>
             </section>
+            <section class="card set-card set-install">
+                <details class="set-howto" id="install-guide-android">
+                    <summary>Instalar no Android</summary>
+                    <ol class="howto install-steps" data-install-steps="android"></ol>
+                    <p class="hint" data-install-note="android"></p>
+                </details>
+                <details class="set-howto" id="install-guide-ios">
+                    <summary>Instalar no iPhone (iOS)</summary>
+                    <ol class="howto install-steps" data-install-steps="ios"></ol>
+                    <p class="hint" data-install-note="ios"></p>
+                </details>
+            </section>
             <section class="card">
                 <details class="set-howto">
                     <summary>Como funciona</summary>
@@ -359,7 +371,7 @@
                 </details>
             </section>
             <p class="made-by"><span class="covem-mark" aria-hidden="true"></span>Um app Covem.</p>
-            <p class="version">Na Pista · v2.12.1</p>
+            <p class="version">Na Pista · v2.12.2</p>
         </section>
         <!-- ═════════ GESTÃO NA PISTA ═════════ -->
         <section id="fin-home-screen" class="screen">
@@ -837,7 +849,7 @@
         <button type="button" class="toast-action" id="toast-action" hidden></button>
     </div>
 
-    <script src="app.js?v=2.12.1" type="module"></script>
+    <script src="app.js?v=2.12.2" type="module"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {

@@ -1,9 +1,9 @@
-import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.12.1';
-import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.12.1';
-import * as L from './logic.js?v=2.12.1';
-import * as P from './plans.js?v=2.12.1';
-import * as F from './finance.js?v=2.12.1';
-import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.12.1';
+import { initAuth, isAuthReady, login, getToken, logout, hasValidToken, invalidateToken, setAccountHint, getAccountHint } from './auth.js?v=2.12.2';
+import { findDataFile, readData, saveData, deleteData, getUserEmail } from './drive.js?v=2.12.2';
+import * as L from './logic.js?v=2.12.2';
+import * as P from './plans.js?v=2.12.2';
+import * as F from './finance.js?v=2.12.2';
+import { createGestao, GESTAO_SCREENS } from './gestao.js?v=2.12.2';
 
 // ═══════════════════════ Constantes ═══════════════════════
 const PRESET_PLATFORMS = ['Uber', '99', 'InDrive', 'Particular', 'iFood', 'Shopee', 'Mercado Livre', 'Lalamove'];
@@ -1879,6 +1879,7 @@ const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.p
 const isAndroid = () => /Android/i.test(navigator.userAgent);
 
 function renderInstall() {
+    renderInstallGuides();
     const installed = isStandalone();
     $('install-card').hidden = installed;
     document.querySelectorAll('.install-link').forEach(b => { b.hidden = installed; });
@@ -1908,29 +1909,51 @@ async function installApp() {
     openInstallHelp();
 }
 
-function openInstallHelp() {
-    let steps, note = '';
-    if (isIOS()) {
-        steps = [
+/** Passo a passo de instalação do atalho, por sistema (diálogo e tela Ajustes). */
+const INSTALL_GUIDE = {
+    ios: {
+        steps: [
             'Abra o Na Pista no <strong>Safari</strong> (no iOS 16.4 ou mais novo também funciona no Chrome).',
             'Toque no botão <strong>Compartilhar</strong> (o quadrado com uma seta para cima).',
             'Role e toque em <strong>Adicionar à Tela de Início</strong>.',
             'Toque em <strong>Adicionar</strong>. O ícone aparece na sua tela inicial.'
-        ];
-        note = 'No app instalado, entre com sua conta Google uma vez: seus dados vêm do Google Drive.';
-    } else if (isAndroid()) {
-        steps = [
+        ],
+        note: 'No app instalado, entre com sua conta Google uma vez: seus dados vêm do Google Drive.'
+    },
+    android: {
+        steps: [
+            'Abra o Na Pista no <strong>Chrome</strong>.',
             'Toque no menu <strong>⋮</strong> do Chrome, no canto superior direito.',
             'Escolha <strong>Instalar app</strong> (ou <strong>Adicionar à tela inicial</strong>).',
-            'Confirme em <strong>Instalar</strong>.'
-        ];
-        note = 'Acabou de desinstalar? O Chrome pode levar alguns minutos para liberar a instalação de novo. Se a opção não aparecer, feche e abra o Chrome.';
-    } else {
-        steps = [
+            'Confirme em <strong>Instalar</strong>. O ícone aparece na sua tela inicial.'
+        ],
+        note: 'Acabou de desinstalar? O Chrome pode levar alguns minutos para liberar a instalação de novo. Se a opção não aparecer, feche e abra o Chrome.'
+    },
+    desktop: {
+        steps: [
             'No Chrome ou Edge, clique no ícone de <strong>instalar</strong> na barra de endereço (um monitor com uma seta).',
             'Ou abra o menu do navegador e escolha <strong>Instalar Na Pista</strong>.'
-        ];
+        ],
+        note: ''
     }
+};
+
+/** Preenche os guias de instalação da tela Ajustes; abre o do aparelho atual. */
+function renderInstallGuides() {
+    ['android', 'ios'].forEach(k => {
+        const ol = document.querySelector(`[data-install-steps="${k}"]`);
+        if (!ol) return;
+        ol.innerHTML = INSTALL_GUIDE[k].steps.map(s => `<li>${s}</li>`).join('');
+        const note = document.querySelector(`[data-install-note="${k}"]`);
+        note.textContent = INSTALL_GUIDE[k].note;
+        note.hidden = !INSTALL_GUIDE[k].note;
+    });
+    if (isIOS()) $('install-guide-ios').open = true;
+    else if (isAndroid()) $('install-guide-android').open = true;
+}
+
+function openInstallHelp() {
+    const { steps, note } = INSTALL_GUIDE[isIOS() ? 'ios' : isAndroid() ? 'android' : 'desktop'];
     $('install-steps').innerHTML = steps.map(s => `<li>${s}</li>`).join('');
     $('install-note').textContent = note;
     $('install-note').hidden = !note;
