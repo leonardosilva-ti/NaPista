@@ -194,7 +194,7 @@ export function calculateTargets(scope, s, history, anchor, today = new Date(), 
     const folga = scope === 'day' && !weekdays.includes(start.getDay());
     const metaBase = folga ? 0 : dailyTarget(s, anchor);
     // meta variável (e o que entrou nas folgas): só a meta do dia muda (semana e mês continuam com a meta cheia)
-    const metaVar = scope === 'day' && !folga ? dayTarget(s, history, startKey, today) - metaBase : 0;
+    const metaVar = scope === 'day' && !folga ? dayTarget(s, history, startKey, today, goals) - metaBase : 0;
     const metaDia = metaBase + metaVar + (scope === 'day' ? metaExtra : 0);
     let metaCheia = scope === 'day' ? metaDia
         : scope === 'week' ? num(s.metaLiquidaMensal) / WEEKS_PER_MONTH
@@ -309,50 +309,96 @@ export const isVariableTarget = (s) => s?.metaVariavel === true && (s.metaVarSob
  * restam (incluindo o dia): sobe quando faltou e/ou desce quando passou,
  * conforme as opções. Dias futuros usam o valor de hoje; o que passar hoje já
  * diminui os próximos dias, o que ainda não foi lançado hoje não aumenta.
+ * Com metas somadas à meta do dia (`goals`), o que passa da meta normal vai
+ * primeiro para elas: só o que sobrar depois delas diminui os próximos dias.
  */
-export function dayTarget(s, history, key, today = new Date()) {
-    const d = parseDateKey(key);
-    const base = dailyTarget(s, d);
-    if (!(base > 0)) return base;
-    const variable = isVariableTarget(s);
+export function dayTarget(s, history, key, today = new Date(), goals = []) {
+    const daily = orderGoals(goals || [], today).filter(isDailyGoal);
+    const plan = targetPlan(s, history, daily, today);
+    return weekdayIsWork(s, key) ? plan.target(key) : plan.raw(key);
+}
+
+const weekdayIsWork = (s, key) => workWeekdays(s).includes(parseDateKey(key).getDay());
+const monthKeyOf = (key) => key.slice(0, 8) + '01';
+const nextMonthKey = (ms) => {
+    const d = parseDateKey(ms);
+    return toDateKey(new Date(d.getFullYear(), d.getMonth() + 1, 1));
+};
+
+/**
+ * Meta normal de cada dia (meta variável e folgas), mês a mês, junto com o que
+ * as metas somadas à meta do dia (`dailyGoals`, na ordem da cascata) levam de
+ * cada dia: primeiro a meta normal; o que passar dela vai para essas metas até
+ * completarem, e só o resto conta como excedente para os próximos dias.
+ * Folga não tem meta normal: tudo o que entrar vai primeiro para essas metas.
+ */
+function targetPlan(s, history, dailyGoals, today) {
     const tk = toDateKey(startOfDay(today));
-    const { start, end } = getMonthRange(d);
-    const ms = toDateKey(start);
-    const me = toDateKey(end);
-    if (ms > tk) return base; // mês que ainda não começou
-    const inicio = typeof s.dataInicio === 'string' && s.dataInicio > ms ? s.dataInicio : ms;
-    if (key < inicio) return base;
-
     const weekdays = workWeekdays(s);
-    const isWork = (key2) => weekdays.includes(parseDateKey(key2).getDay());
-    const nets = new Map();
-    history.forEach(h => {
-        // sem a meta variável, só o que entrou nas folgas conta (como excedente)
-        if (h.date >= inicio && h.date <= me && (variable || !isWork(h.date))) nets.set(h.date, dayNet(h, s));
-    });
-    if (!variable && ![...nets.values()].some(v => v > 0)) return base;
-    // diferença acumulada (lucro − meta) dos dias de `inicio` até antes de `k`;
-    // folga não tem meta: o que entrar nela é excedente
-    const cumBefore = (k) => {
-        let c = 0;
-        for (let x = parseDateKey(inicio), xk = inicio; xk < k; x = addDays(x, 1), xk = toDateKey(x)) {
-            c += nets.get(xk) || 0;
-            if (variable && weekdays.includes(x.getDay())) c -= base;
-        }
-        return c;
-    };
-    const raw = (k) => base - cumBefore(k) / Math.max(1, countWorkDays(parseDateKey(k), end, weekdays));
+    const variable = isVariableTarget(s);
+    const nets = new Map(history.map(h => [h.date, dayNet(h, s)]));
+    const rem = new Map(dailyGoals.map(g => [g.id, num(g.amount)]));
+    const targets = new Map(), raws = new Map(), ran = new Set();
+    const firstGoal = dailyGoals.reduce((m, g) => (!m || g.startDate < m ? g.startDate : m), null);
+    let cursor = firstGoal ? monthKeyOf(firstGoal) : null;
 
-    let v;
-    if (key <= tk) {
-        v = raw(key);
-    } else {
-        const next = toDateKey(addDays(parseDateKey(tk), 1));
-        v = Math.min(raw(tk), next <= me ? raw(next) : raw(tk));
-    }
-    if (!variable || s.metaVarSobe === false) v = Math.min(base, v);
-    if (variable && s.metaVarDesce === false) v = Math.max(base, v);
-    return Math.max(0, v);
+    const take = (k, extra) => {
+        let left = extra;
+        for (const g of dailyGoals) {
+            if (left <= 0) break;
+            if (k < g.startDate || k > g.deadline) continue;
+            const u = Math.min(left, rem.get(g.id));
+            if (!(u > 0)) continue;
+            rem.set(g.id, rem.get(g.id) - u);
+            left -= u;
+        }
+        return extra - left;
+    };
+
+    const runMonth = (ms) => {
+        const d0 = parseDateKey(ms);
+        const end = getMonthRange(d0).end;
+        const me = toDateKey(end);
+        const base = dailyTarget(s, d0);
+        const inicio = typeof s.dataInicio === 'string' && s.dataInicio > ms ? s.dataInicio : ms;
+        const clamp = (v) => {
+            if (!variable || s.metaVarSobe === false) v = Math.min(base, v);
+            if (variable && s.metaVarDesce === false) v = Math.max(base, v);
+            return Math.max(0, v);
+        };
+        let cum = 0, rawToday = null, future = null;
+        for (let d = d0, k = ms; k <= me; d = addDays(d, 1), k = toDateKey(d)) {
+            const work = weekdays.includes(d.getDay());
+            const raw = base - cum / Math.max(1, countWorkDays(d, end, weekdays));
+            if (k === tk) rawToday = raw;
+            let v;
+            if (!(base > 0) || ms > tk || k < inicio) v = base;
+            else if (k <= tk) v = clamp(raw);
+            else v = future ??= clamp(Math.min(rawToday ?? raw, raw));
+            raws.set(k, v);
+            targets.set(k, work ? v : 0);
+            const net = nets.get(k) ?? 0;
+            const t = net > 0 ? take(k, Math.max(0, net - (work ? v : 0))) : 0;
+            if (k < inicio) continue;
+            if (variable || !work) cum += net - t;
+            if (variable && work) cum -= base;
+        }
+    };
+
+    const ensure = (key) => {
+        const m = monthKeyOf(key);
+        if (ran.has(m)) return;
+        if (!cursor || m < cursor) { runMonth(m); ran.add(m); return; }
+        while (cursor <= m) {
+            if (!ran.has(cursor)) { runMonth(cursor); ran.add(cursor); }
+            cursor = nextMonthKey(cursor);
+        }
+    };
+
+    return {
+        target: (key) => { ensure(key); return targets.get(key); },
+        raw: (key) => { ensure(key); return raws.get(key); }
+    };
 }
 
 /** Meta líquida diária: meta mensal dividida pelos dias de trabalho do mês. */
@@ -396,12 +442,6 @@ export function goalDailyShare(g) {
     return n > 0 ? num(g.amount) / n : 0;
 }
 
-/** Meta normal de um dia (a do perfil); é o que fica fora das metas somadas à meta do dia. */
-function baseDayTarget(s, key, history) {
-    const d = parseDateKey(key);
-    return workWeekdays(s).includes(d.getDay()) ? dayTarget(s, history, key) : 0;
-}
-
 /**
  * Acréscimo de cada dia entre `fromKey` e `toKey` pelas metas somadas à meta do
  * dia: Map(data → [{ goal, value }]). Cada dia de trabalho da meta recebe o que
@@ -412,7 +452,7 @@ export function goalDailyExtras(goals, s, history, fromKey, toKey, today = new D
     const out = new Map();
     const daily = (goals || []).filter(g => isDailyGoal(g) && g.startDate <= toKey && g.deadline >= fromKey);
     if (!daily.length) return out;
-    const alloc = allocateGoals(orderGoals(goals, today), history, s);
+    const alloc = allocateGoals(orderGoals(goals, today), history, s, null, today);
     for (const g of daily) {
         const wd = goalWeekdaysOf(g);
         const trace = alloc.trace.get(g.id) || [];
@@ -485,11 +525,13 @@ export function orderGoals(goals, today = new Date()) {
  * faturamento bruto correspondente (proporcional ao líquido usado de cada
  * dia) fica em `.gross`, Map(id → bruto).
  */
-export function allocateGoals(order, history, s, skipKey = null) {
+export function allocateGoals(order, history, s, skipKey = null, today = new Date()) {
     const avail = new Map();
     const availGross = new Map();
-    history.forEach(d => {
-        if (d.date === skipKey) return;
+    const hist = skipKey ? history.filter(d => d.date !== skipKey) : history;
+    // meta normal de cada dia, já descontando o que as metas somadas levaram antes
+    const plan = targetPlan(s, hist, order.filter(isDailyGoal), today);
+    hist.forEach(d => {
         avail.set(d.date, dayNet(d, s));
         availGross.set(d.date, dayGross(d));
     });
@@ -507,7 +549,7 @@ export function allocateGoals(order, history, s, skipKey = null) {
             if (k > g.deadline || got >= meta) break;
             const total = avail.get(k);
             // somada à meta do dia: só o que passa da meta normal do dia conta para ela
-            const reserve = daily && total > 0 ? Math.min(total, baseDayTarget(s, k, history)) : 0;
+            const reserve = daily && total > 0 ? Math.min(total, plan.target(k)) : 0;
             const a = total - reserve;
             if (daily && !(a > 0)) continue;
             if (!a && !availGross.get(k)) continue;
@@ -675,8 +717,8 @@ export function evaluateGoals(goals, s, history, today = new Date()) {
     const t = startOfDay(today);
     const tk = toDateKey(t);
     const order = orderGoals(goals, t);
-    const after = allocateGoals(order, history, s);
-    const before = allocateGoals(order, history, s, tk);
+    const after = allocateGoals(order, history, s, null, t);
+    const before = allocateGoals(order, history, s, tk, t);
     const results = order.map((g, i) => ({
         ...goalProgress(g, s, history, t, { net: after.get(g.id) || 0, gross: after.gross.get(g.id) || 0, netBefore: before.get(g.id) || 0 }),
         rank: i

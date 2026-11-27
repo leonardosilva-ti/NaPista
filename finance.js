@@ -1,6 +1,6 @@
 // Gestão na Pista: regras de finanças pessoais (contas, lançamentos e cartões).
 // Sem dependência de DOM. Datas sempre como "AAAA-MM-DD" no fuso do aparelho.
-import { num, toDateKey, parseDateKey, dayNet, dayGross, dayExpenses, dayTarget, workWeekdays, goalDailyExtras } from './logic.js?v=2.11.0';
+import { num, toDateKey, parseDateKey, dayNet, dayGross, dayExpenses, dayTarget, workWeekdays, goalDailyExtras } from './logic.js?v=2.11.1';
 
 export const WALLET_ID = 'carteira';
 export const APPS_CATEGORY_ID = 'r_apps';
@@ -347,7 +347,7 @@ export function forecastOccurrences(data, fromKey, toKey, todayKey = toDateKey(n
         const d = parseDateKey(k);
         if (launched.has(k) || !weekdays.includes(d.getDay())) continue;
         const extra = (extras.get(k) || []).reduce((a, x) => a + x.value, 0);
-        const amount = Math.round((dayTarget(data.settings, data.history, k, parseDateKey(todayKey)) + extra) * 100) / 100;
+        const amount = Math.round((dayTarget(data.settings, data.history, k, parseDateKey(todayKey), data.goals) + extra) * 100) / 100;
         if (amount < 0.005) continue;
         out.push({
             id: `fc:${k}`,
